@@ -108,7 +108,7 @@ setuprepo() {
 		# always move back to root folder
 		cd "$ROOTDIR"
 		# we remove the ZIP file
-		rm "$zippath"
+		# rm "$zippath" (don't remove since we may need to run this again if a name of the zip has changed)
 	fi
 }
 
