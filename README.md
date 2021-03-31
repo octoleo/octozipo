@@ -1,42 +1,88 @@
-## Convert Zip Packages to Repositories
+# Octozipo
 
-The idea of this script is to update a bunch of respositories at once with simple zip packages.
+Convert Zip packages to repositories and if they exist update and tag them.
 
 ## Install
 
-Clone this repository
 ```shell
-$ git clone https://git.vdm.dev/octoleo/zip-to-repo.git
+$ sudo curl -L "https://git.vdm.dev/api/v1/repos/octoleo/octozipo/raw/src/octozipo" -o /usr/local/bin/octozipo
+$ sudo chmod +x /usr/local/bin/octozipo
 ```
+- Global **environment** file can be set at: `/home/$USER/.config/octozipo/.env`
+- OR/And Per projects **environment** file `.octozipo` inside the _same_ directory as the zip files
 
-Then setup your own **environment** file `.env` with the following values:
+**Options:**
 ```txt
-ORG="octoleo"
-ROOTDIR="/home/user/path/to/zip/files/"
-REMOTESYSTEM="git.vdm.dev"
-PUSH_CREATE=true
+VDM_ORG="octoleo"
+VDM_ROOT_DIR="/home/user/path/to/zip/files/"
+VDM_REMOTE_SYSTEM="git.vdm.dev"
+VDM_PUSH_CREATE=true
 ```
 
-- ORG: git.vdm.dev/[ORG] in the repository path
-- ROOTDIR: the full path to where you have placed all the zipped files
-- REMOTESYSTEM: the base URI of your gitea system
-- PUSH_CREATE: switch to push-create repositories that don't already exist
+- VDM_ORG: git.vdm.dev/[ORG] in the repository path (default: octoleo)
+- VDM_ROOT_DIR: the full path to where you have placed all the zipped files (default: current dir)
+- VDM_REMOTE_SYSTEM: the base URI of your gitea system (default: git.vdm.dev)
+- VDM_PUSH_CREATE: switch to push-create repositories that don't already exist (default: false)
 
-## Run the script
+## Usage
 
-Make the script executable
+> To see the help menu
 ```shell
-$ sudo chmod +x run.sh
+$ octozipo -h
+```
+---
+
+> To update
+```shell
+$ octozipo --update
 ```
 
-Execute the script
+### Help Menu (Octozipo)
+```txt
+Usage: octozipo [OPTION...]
+	Options
+	======================================================
+   -e | --env=<file>
+	load the environment variables file
+	example: octozipo --env=/src/.env
+	======================================================
+   -q | --quiet
+	mute all output messages
+	example: octozipo --quiet
+	======================================================
+   --update
+	to update your install
+	example: octozipo --update
+	======================================================
+   --uninstall
+	to uninstall this script
+	example: octozipo --uninstall
+	======================================================
+   -h|--help
+	display this help menu
+	example: octozipo -h
+	example: octozipo --help
+	======================================================
+			Octozipo v1.0.1
+	======================================================
+```
+### Example
+
+Execute the script in the directory where your zip files are found
 ```shell
-$ ./run.sh
+$ octozipo joomla true
+```
+
+This will target the git.vdm.dev/joomla organization and if a package is unzipped and not found it will push to create that repository.
+
+### Uninstall
+
+```shell
+$ octozipo --uninstall
 ```
 
 ### Free Software License
 ```txt
 @copyright  Copyright (C) 2021 Llewellyn van der Merwe. All rights reserved.
-@license    GNU General Public License version 2 or later; see LICENSE.txt
+@license    GNU General Public License version 2; see LICENSE.txt
 ```
-

@@ -1,0 +1,383 @@
+#! /bin/bash
+
+# Program name
+PROGRAM_NAME="Octozipo"
+PROGRAM_CODE="octozipo"
+PROGRAM_VERSION="1.0.1"
+PROGRAM_V="1.0"
+PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
+
+# Do some prep work
+command -v git >/dev/null 2>&1 || {
+  echo >&2 "[error] We require git for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
+  exit 1
+}
+command -v unzip >/dev/null 2>&1 || {
+  echo >&2 "[error] We require unzip for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
+  exit 1
+}
+command -v curl >/dev/null 2>&1 || {
+  echo >&2 "[error] We require curl for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
+  exit 1
+}
+
+# main function ˘Ô≈ôﺣ
+main() {
+  # make sure the root dir exist
+  if [ -d "$VDM_ROOT_DIR" ]; then
+    # go to folder where zip files are placed
+    cd "$VDM_ROOT_DIR" || exit 3
+    # check that the folder has zip files
+    # shellcheck disable=SC2012
+    [ "$(ls -1 ./*.zip 2>/dev/null | wc -l)" == 0 ] && showError "looking for zip files, since no zip files in the folder $VDM_ROOT_DIR ERROR-NR" 6
+    # get all zip files
+    for z in *.zip; do
+      # get folder and repo name
+      repo=$(getRepoName "$z")
+      # get folder and repo name
+      version=$(getVersion "$z")
+      _echo "[info] ${repo} - v${version}"
+      # check if the repo exist on our system
+      if git ls-remote "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${repo}.git" -q >/dev/null 2>&1; then
+        setExistingRepository "$repo" "${version:-0}" "$z" || showError "Update Repo:(${repo}) ERROR-NR" 7
+      else
+        setNewRepository "$repo" "${version:-0}" "$z" || showError "Setup Repo:(${repo}) ERROR-NR" 7
+      fi
+    done
+  else
+    showError "opening of folder $VDM_ROOT_DIR as it does not exist ERROR-NR" 5
+  fi
+}
+
+# get repository name
+getRepoName() {
+  local name
+  name=$(rightStrip "$1" "-v*")
+  name=$(rightStrip "$name" "_v*")
+  name=$(rightStrip "$name" ".zip")
+  echo "$name"
+}
+
+# get current version
+# TODO need improve this to more accurate when a zip file name is not following this convention
+getVersion() {
+  local version
+  version=$(leftStrip "$1" "*-v")
+  version=$(leftStrip "$version" "*_v")
+  version=$(rightStrip "$version" ".zip")
+  version=${version//-/\.}
+  version=${version//_/\.}
+  version=$(rightStrip "$version" "..*")
+  echo "$version"
+}
+
+# Strip pattern from end of string
+rightStrip() {
+  # Usage: rightStrip "string" "pattern"
+  printf '%s\n' "${1%%$2}"
+}
+
+# Strip pattern from start of string
+leftStrip() {
+  # Usage: leftStrip "string" "pattern"
+  printf '%s\n' "${1##$2}"
+}
+
+# setup new repository
+setNewRepository() {
+  _echo "[info] New repository (${VDM_REMOTE_SYSTEM}:${VDM_ORG}/$1)"
+  # set repo path
+  repo_path="$VDM_ROOT_DIR/$1"
+  # set zip path
+  zip_path="$VDM_ROOT_DIR/$3"
+  # we creat the repo dir
+  mkdir -p "$repo_path"
+  # change to this directory and make sure its empty
+  if cd "$repo_path" >/dev/null 2>&1; then
+    rm -rf ./*
+  else
+    return 1
+  fi
+  # we unzip the data to this new folder
+  if unzip "$zip_path" -d "$repo_path" >/dev/null 2>&1; then
+    _echo "[info] Successfully unzipped the package"
+  else
+    return 1
+  fi
+  # we initialize the git repo locally
+  setGitInit "$1" "$2" || return 1
+  # check if push create is allowed
+  if ($VDM_PUSH_CREATE); then
+    # we push to create this repo
+    git push -u origin master >/dev/null 2>&1
+    # check if we have tags to push
+    git push --tags >/dev/null 2>&1
+    # always move back to root folder
+    cd "$VDM_ROOT_DIR" || return 1
+    # we remove the ZIP file
+    rm "${zip_path:?}"
+    # we can also remove the folder
+    rm -rf "${repo_path:?}"
+    # pushed create
+    _echo "[info] Push created ($1-v$2) repository"
+  else
+    # give action info
+    echo "[info] When ready link and push changes to remote"
+    # always move back to root folder
+    cd "$VDM_ROOT_DIR" || return 1
+    # we remove the ZIP file
+    # rm "$zip_path" (don't remove since we may need to run this again if a name of the zip has changed)
+  fi
+  return 0
+}
+
+# make git commit of the update and set the new tag
+setGitInit() {
+  # check if this is an existing local repo
+  if [ -d ".git" ]; then
+    if [[ -z $(git status --porcelain) ]]; then
+      _echo "[info] No changes found in repository"
+    else
+      if [ "$(git tag -l "v$2")" ]; then
+        setGitCommit "$2" "update" || return 4
+      else
+        setGitCommit "$2" "update - v$2" || return 4
+      fi
+    fi
+  else
+    git init || return 4
+    setGitCommit "$2" "first commit - v$2" || return 4
+    git remote add origin "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
+  fi
+  return 0
+}
+
+# make git commit of the update and set the new tag
+setGitCommit() {
+  git add . >/dev/null 2>&1 || return 1
+  git commit -am"$2" >/dev/null 2>&1 || return 1
+  # check if tag exist
+  if [ "$(git tag -l "v$1")" ]; then
+    return 0
+  else
+    git tag "v$1" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+# make git commit of the update and set the new tag
+setPushChanges() {
+  git push >/dev/null 2>&1 || return 1
+  git push --tags >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# update repository repository
+setExistingRepository() {
+  _echo "[info] Update ($1-v$2) repository"
+  # set repo path
+  repo_path="$VDM_ROOT_DIR/$1"
+  # set zip path
+  zip_path="$VDM_ROOT_DIR/$3"
+  # check if repo is locally found
+  cd "$repo_path" >/dev/null 2>&1 || git clone "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
+  # make sure we are in the correct dir
+  if cd "$repo_path" >/dev/null 2>&1; then
+    rm -rf ./*
+  else
+    return 1
+  fi
+  # now lets unzip the new data to this repo
+  if unzip "$zip_path" -d "$repo_path" >/dev/null 2>&1; then
+    _echo "[info] Successfully unzipped the package"
+  else
+    # break out
+    return 1
+  fi
+  # lets check if there are changes
+  if [[ -z $(git status --porcelain) ]]; then
+    _echo "[info] No changes found in ($1-v$2) repository"
+  else
+    if [ "$(git tag -l "v$2")" ]; then
+      setGitCommit "$2" "update" || return 4
+    else
+      setGitCommit "$2" "update - v$2" || return 4
+    fi
+    # push the changes
+    setPushChanges || return 1
+    # updated the repository
+    _echo "[info] Pushed update to ($1-v$2) repository"
+  fi
+  # always move back to root folder
+  cd "$VDM_ROOT_DIR" || return 1
+  # we remove the ZIP file
+  rm "${zip_path:?}"
+  # we can also remove the folder
+  rm -rf "${repo_path:?}"
+  # success
+  return 0
+}
+
+# only if not set to be quiet
+function _echo() {
+  if (("$QUIET" == 0)); then
+    echo "$1"
+  fi
+}
+
+# show an error
+showError() {
+  echo "[error] We encountered and error on $1:$2"
+  exit "$2"
+}
+
+# remove the program if installed
+function runUninstall() {
+  # now remove the script
+  if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
+    sudo rm -f "/usr/local/bin/${PROGRAM_CODE}"
+    echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} has been completely uninstalled."
+  else
+    echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} is not installed."
+  fi
+}
+
+# update the script with the latest version
+function runUpdate() {
+  # remove the current version
+  if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
+    # just backup in case of failure
+    sudo mv "/usr/local/bin/${PROGRAM_CODE}" "/usr/local/bin/${PROGRAM_CODE}.bak"
+  fi
+  # pull the latest version. Master is always the latest
+  if sudo curl --fail -L "https://git.vdm.dev/api/v1/repos/octoleo/${PROGRAM_CODE}/raw/src/${PROGRAM_CODE}?ref=${branch:-master}" -o "/usr/local/bin/${PROGRAM_CODE}" 2>/dev/null; then
+    # give success message
+    _echo "[success] Update was successful."
+    # do we have a backup
+    if [ -f "/usr/local/bin/${PROGRAM_CODE}.bak" ]; then
+      # lets remove it now
+      sudo rm -f "/usr/local/bin/${PROGRAM_CODE}.bak"
+    fi
+  else
+    # show the error
+    echo >&2 "[error] Update failed! Please try again later."
+    # do we have a backup
+    if [ -f "/usr/local/bin/${PROGRAM_CODE}.bak" ]; then
+      # move backup back
+      sudo mv "/usr/local/bin/${PROGRAM_CODE}.bak" "/usr/local/bin/${PROGRAM_CODE}"
+    fi
+  fi
+  # always set the permission again if we have a file
+  if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
+    # the we make sure its executable
+    sudo chmod +x "/usr/local/bin/${PROGRAM_CODE}"
+  fi
+  # always exit so the new script can load
+  exit 0
+}
+
+# help message ʕ•ᴥ•ʔ
+function show_help() {
+  cat <<EOF
+Usage: ${PROGRAM_CODE} [OPTION...]
+	Options
+	======================================================
+   -e | --env=<file>
+	load the environment variables file
+	example: ${PROGRAM_CODE} --env=/src/.env
+	======================================================
+   -q | --quiet
+	mute all output messages
+	example: ${PROGRAM_CODE} --quiet
+	======================================================
+   --update
+	to update your install
+	example: ${PROGRAM_CODE} --update
+	======================================================
+   --uninstall
+	to uninstall this script
+	example: ${PROGRAM_CODE} --uninstall
+	======================================================
+   -h|--help
+	display this help menu
+	example: ${PROGRAM_CODE} -h
+	example: ${PROGRAM_CODE} --help
+	======================================================
+			${PROGRAM_NAME} v${PROGRAM_VERSION}
+	======================================================
+EOF
+}
+
+# set the defaults
+VDM_ORG="octoleo"
+VDM_ROOT_DIR="$PWD"
+VDM_REMOTE_SYSTEM="git.vdm.dev"
+VDM_PUSH_CREATE=false
+QUIET=0
+
+# check if we have options
+while :; do
+  case $1 in
+  -h | --help)
+    show_help # Display a usage synopsis.
+    exit
+    ;;
+  -q | --quiet)
+    QUIET=1
+    ;;
+  --uninstall)
+    runUninstall
+    shift
+    ;;
+  --update)
+    runUpdate
+    shift
+    ;;
+  -e | --env) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_ENV_FILE_PATH=$2
+      shift
+    else
+      echo '[error] "--env" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -e=?* | --env=?*)
+    VDM_ENV_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -e= | --env=) # Handle the case of an empty --packages=
+    echo '[error] "--env=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  *) # Default case: No more options, so break out of the loop.
+    break ;;
+  esac
+  shift
+done
+
+# the environment variables path
+tmp_path="$VDM_ROOT_DIR/.${PROGRAM_CODE}"
+# if path not set try VDM_ROOT_DIR path
+[ -f "$tmp_path" ] || tmp_path="/home/$USER/.config/${PROGRAM_CODE}/.env"
+tmp_path="${VDM_ENV_FILE_PATH:-$tmp_path}"
+# add env to system
+if [ -f ".${tmp_path}" ]; then
+  # shellcheck disable=SC1090
+  source ".${tmp_path}"
+fi
+unset tmp_path
+
+# catch the values passed
+VDM_ORG="${1:-$VDM_ORG}"
+VDM_PUSH_CREATE="${2:-$VDM_PUSH_CREATE}"
+VDM_ROOT_DIR="${3:-$VDM_ROOT_DIR}"
+VDM_REMOTE_SYSTEM="${4:-$VDM_REMOTE_SYSTEM}"
+
+# show globals if DEBUG
+# echo "$VDM_ORG"
+# echo "$VDM_ROOT_DIR"
+# echo "$VDM_REMOTE_SYSTEM"
+# exit
+
+# run main
+main
