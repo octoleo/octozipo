@@ -34,14 +34,11 @@ main() {
     for z in *.zip; do
       # get folder and repo name
       repo=$(getRepoName "$z")
-      # get folder and repo name
-      version=$(getVersion "$z")
-      _echo "[info] ${repo} - v${version}"
       # check if the repo exist on our system
       if git ls-remote "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${repo}.git" -q >/dev/null 2>&1; then
-        setExistingRepository "$repo" "${version:-0}" "$z" || showError "Update Repo:(${repo}) ERROR-NR" 7
+        setExistingRepository "$repo" "$z" || showError "Update Repo:(${repo}) ERROR-NR" 7
       else
-        setNewRepository "$repo" "${version:-0}" "$z" || showError "Setup Repo:(${repo}) ERROR-NR" 7
+        setNewRepository "$repo" "$z" || showError "Setup Repo:(${repo}) ERROR-NR" 7
       fi
     done
   else
@@ -55,12 +52,15 @@ getRepoName() {
   name=$(rightStrip "$1" "-v*")
   name=$(rightStrip "$name" "_v*")
   name=$(rightStrip "$name" ".zip")
+  # shellcheck disable=SC2001
+  name=$(echo "$name" | sed 's/[0-9.]//g')
+  name=$(rightStrip "$name" "_")
+  name=$(rightStrip "$name" "-")
   name=$(getMapped "$name")
   echo "$name"
 }
 
 # get current version
-# TODO need improve this to more accurate when a zip file name is not following this convention
 getVersion() {
   local version
   version=$(leftStrip "$1" "*-v")
@@ -69,7 +69,57 @@ getVersion() {
   version=${version//-/\.}
   version=${version//_/\.}
   version=$(rightStrip "$version" "..*")
-  echo "$version"
+  # shellcheck disable=SC2001
+  version=$(echo "$version" | sed 's/[^0-9.]//g')
+  version=$(leftStrip "$version" "..")
+  # if we have numbers
+  [[ "$version" =~ [0-9] ]] && echo "$version"
+}
+
+# check that we are in the root folder
+function getVersionPath() {
+  # some locals
+  local filename="$1"
+  local main_path
+  local version
+  local len=100
+  # get all xml (to get version)
+  find . -type f -name '*.xml'  > tmp
+  # now loop the files
+  while IFS= read -r file
+  do
+    # get the version
+    v=$(grep -i '<version>' "$file" | sed 's/[^0-9.]//g')
+    # when we have a version we have a xml that could match
+    if [ -n "$v" ]; then
+      # count the folder depth
+      # shellcheck disable=SC2001
+      p=$(echo "$file" | sed 's|[^/]||g')
+      # keep the value of the shortest path
+      if [[ "${#p}" -lt $len ]]; then
+        # set the directory name
+        main_path="$(dirname "${file}")"
+        # update the length
+        len="${#p}"
+        # set the version
+        version="$v"
+      fi
+    fi
+  done < tmp
+  # remove the tmp file
+  rm tmp
+  # set the root path of the extension
+  VDM_PATH_TO_GO="${2}${main_path#.}"
+  # return the version if found
+  if [ -z "$version" ]; then
+     VDM_PATH_VERSION_GO=$(getVersion "$filename")
+  else
+    VDM_PATH_VERSION_GO="$version"
+  fi
+  # we export this path
+  export VDM_PATH_TO_GO
+  # we export the version
+  export VDM_PATH_VERSION_GO
 }
 
 # Strip pattern from end of string
@@ -89,12 +139,13 @@ setNewRepository() {
   # some locals
   local repo_path
   local zip_path
+  local version
   # give heads up of the new repo
   _echo "[info] New repository (${VDM_REMOTE_SYSTEM}:${VDM_ORG}/$1)"
   # set repo path
   repo_path="$VDM_ROOT_DIR/$1"
   # set zip path
-  zip_path="$VDM_ROOT_DIR/$3"
+  zip_path="$VDM_ROOT_DIR/$2"
   # we creat the repo dir
   mkdir -p "$repo_path"
   # change to this directory and make sure its empty
@@ -109,8 +160,18 @@ setNewRepository() {
   else
     return 1
   fi
+  # set version and correct dir
+  getVersionPath "${2}" "${repo_path}"
+  # check if we have a path
+  # shellcheck disable=SC2164
+  [ -d "${VDM_PATH_TO_GO}" ] && cd "${VDM_PATH_TO_GO}"
+  # set the version
+  [ -n "${VDM_PATH_VERSION_GO}" ] && version="${VDM_PATH_VERSION_GO}"
+  # remove the global values
+  unset VDM_PATH_TO_GO
+  unset VDM_PATH_VERSION_GO
   # we initialize the git repo locally
-  setGitInit "$1" "$2" || return 1
+  setGitInit "$1" "$version" || return 1
   # check if push create is allowed
   if ($VDM_PUSH_CREATE); then
     # we push to create this repo
@@ -124,7 +185,7 @@ setNewRepository() {
     # we can also remove the folder
     rm -rf "${repo_path:?}"
     # pushed create
-    _echo "[info] Push created ($1-v$2) repository"
+    _echo "[info] Push created ($1-v$version) repository"
   else
     # give action info
     echo "[info] When ready link and push changes to remote"
@@ -143,7 +204,7 @@ setGitInit() {
     if [[ -z $(git status --porcelain) ]]; then
       _echo "[info] No changes found in repository"
     else
-      if [ "$(git tag -l "v$2")" ]; then
+      if [ -z "$2" ] || [ "$(git tag -l "v$2")" ]; then
         setGitCommit "$2" "update" || return 4
       else
         setGitCommit "$2" "update - v$2" || return 4
@@ -151,7 +212,12 @@ setGitInit() {
     fi
   else
     git init >/dev/null 2>&1 || return 4
-    setGitCommit "$2" "first commit - v$2" || return 4
+    # check if we have a version number
+    if [ -z "$2" ]; then
+      setGitCommit "$2" "first commit" || return 4
+    else
+      setGitCommit "$2" "first commit - v$2" || return 4
+    fi
     git remote add origin "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
   fi
   return 0
@@ -162,10 +228,12 @@ setGitCommit() {
   git add . >/dev/null 2>&1 || return 1
   git commit -am"$2" >/dev/null 2>&1 || return 1
   # check if tag exist
-  if [ "$(git tag -l "v$1")" ]; then
-    return 0
-  else
-    git tag "v$1" >/dev/null 2>&1 || return 1
+  if [ -n "$1" ]; then
+    if [ "$(git tag -l "v$1")" ]; then
+      return 0
+    else
+      git tag "v$1" >/dev/null 2>&1 || return 1
+    fi
   fi
   return 0
 }
@@ -182,12 +250,13 @@ setExistingRepository() {
   # some locals
   local repo_path
   local zip_path
+  local version
   # give heads up of the update repo
-  _echo "[info] Update ($1-v$2) repository"
+  _echo "[info] Update ($1) repository"
   # set repo path
   repo_path="$VDM_ROOT_DIR/$1"
   # set zip path
-  zip_path="$VDM_ROOT_DIR/$3"
+  zip_path="$VDM_ROOT_DIR/$2"
   # check if repo is locally found
   cd "$repo_path" >/dev/null 2>&1 || git clone "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
   # make sure we are in the correct dir
@@ -203,19 +272,29 @@ setExistingRepository() {
     # break out
     return 1
   fi
+  # set version and correct dir
+  getVersionPath "${2}" "${repo_path}"
+  # check if we have a path
+  # shellcheck disable=SC2164
+  [ -d "${VDM_PATH_TO_GO}" ] && cd "${VDM_PATH_TO_GO}"
+  # set the version
+  [ -n "${VDM_PATH_VERSION_GO}" ] && version="${VDM_PATH_VERSION_GO}"
+  # remove the global values
+  unset VDM_PATH_TO_GO
+  unset VDM_PATH_VERSION_GO
   # lets check if there are changes
   if [[ -z $(git status --porcelain) ]]; then
-    _echo "[info] No changes found in ($1-v$2) repository"
+    _echo "[info] No changes found in ($1-v$version) repository"
   else
-    if [ "$(git tag -l "v$2")" ]; then
-      setGitCommit "$2" "update" || return 4
+    if [ "$(git tag -l "v$version")" ]; then
+      setGitCommit "$version" "update" || return 4
     else
-      setGitCommit "$2" "update - v$2" || return 4
+      setGitCommit "$version" "update - v$version" || return 4
     fi
     # push the changes
     setPushChanges || return 1
     # updated the repository
-    _echo "[info] Pushed update to ($1-v$2) repository"
+    _echo "[info] Pushed update to ($1-v$version) repository"
   fi
   # always move back to root folder
   cd "$VDM_ROOT_DIR" || return 1

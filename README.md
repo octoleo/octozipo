@@ -42,6 +42,11 @@ $ octozipo --update
 Usage: octozipo [OPTION...]
 	Options
 	======================================================
+   -m | --mapper=<file>
+	load the mapping file
+	that convert zip names to repo names
+	example: octozipo --mapper=/src/.mapper
+	======================================================
    -e | --env=<file>
 	load the environment variables file
 	example: octozipo --env=/src/.env
