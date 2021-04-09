@@ -14,14 +14,14 @@ $ sudo chmod +x /usr/local/bin/octozipo
 **Options:**
 ```txt
 VDM_ORG="octoleo"
-VDM_ROOT_DIR="/home/user/path/to/zip/files/"
-VDM_REMOTE_SYSTEM="git.vdm.dev"
+VDM_ZIP_DIR="/home/user/path/to/zip/files"
+VDM_GIT_URL="git.vdm.dev"
 VDM_PUSH_CREATE=true
 ```
 
-- VDM_ORG: git.vdm.dev/[ORG] in the repository path (default: octoleo)
-- VDM_ROOT_DIR: the full path to where you have placed all the zipped files (default: current dir)
-- VDM_REMOTE_SYSTEM: the base URI of your gitea system (default: git.vdm.dev)
+- VDM_ORG: git.vdm.dev/[ORG] in the repository path (default: joomla)
+- VDM_ZIP_DIR: the full path to where you have placed all the zipped files (default: current dir)
+- VDM_GIT_URL: the base URI of your gitea system (default: git.vdm.dev)
 - VDM_PUSH_CREATE: switch to push-create repositories that don't already exist (default: false)
 
 ## Usage
@@ -40,42 +40,92 @@ $ octozipo --update
 ### Help Menu (Octozipo)
 ```txt
 Usage: octozipo [OPTION...]
-	Options
-	======================================================
+        Options
+        ======================================================
+   -o | --org=[ORG]
+        directory of the org/user repository
+        default: joomla
+        example: octozipo -o=joomla
+        example: octozipo --org=joomla
+        ======================================================
+   -z | --zip-dir=<full-path-to-directory>
+        full path to directory of the zip files
+        default: $PWD
+        example: octozipo -z=/home/username/zipfiles
+        example: octozipo --zip-dir=/home/username/zipfiles
+        ======================================================
+   -g | --git-url=<url>
+        git remote repository base url
+        default: git.vdm.dev
+        example: octozipo -g=git.vdm.dev
+        example: octozipo --git-url=git.vdm.dev
+        ======================================================
    -m | --mapper=<file>
-	load the mapping file
-	that convert zip names to repo names
-	example: octozipo --mapper=/src/.mapper
-	======================================================
+        load the mapping file
+        that convert zip names to repo names
+        example: octozipo --mapper=/src/.mapper
+        ======================================================
    -e | --env=<file>
-	load the environment variables file
-	example: octozipo --env=/src/.env
-	======================================================
+        load the environment variables file
+        example: octozipo --env=/src/.env
+        ======================================================
+   -p | --push-create
+        switch to try push create new repositories
+        this may not work with github
+        example: octozipo -p
+        example: octozipo --push-create
+        ======================================================
+   -s | --spacer=<char>
+        set the spacer used in repo name
+        default: -
+        example: octozipo -s _
+        example: octozipo --spacer=_
+        ======================================================
+   --keep-repo
+        switch to keep the repository directory
+        example: octozipo --keep-repo
+        ======================================================
+   --keep-zip
+        switch to keep the zip file
+        example: octozipo --keep-zip
+        ======================================================
+   --use-xml-name
+        use the name found in the xml as the repository name
+        example: octozipo --use-xml-name
+        ======================================================
+   -d | --dry
+        dry run of the program
+        example: octozipo --dry
+        ======================================================
    -q | --quiet
-	mute all output messages
-	example: octozipo --quiet
-	======================================================
+        mute all output messages
+        example: octozipo --quiet
+        ======================================================
+   --debug
+        tp print out all config details
+        example: octozipo --debug
+        ======================================================
    --update
-	to update your install
-	example: octozipo --update
-	======================================================
+        to update your install
+        example: octozipo --update
+        ======================================================
    --uninstall
-	to uninstall this script
-	example: octozipo --uninstall
-	======================================================
+        to uninstall this script
+        example: octozipo --uninstall
+        ======================================================
    -h|--help
-	display this help menu
-	example: octozipo -h
-	example: octozipo --help
-	======================================================
-			Octozipo v1.0.1
-	======================================================
+        display this help menu
+        example: octozipo -h
+        example: octozipo --help
+        ======================================================
+                        Octozipo v1.1.0
+        ======================================================
 ```
 ### Example
 
 Execute the script in the directory where your zip files are found
 ```shell
-$ octozipo joomla true
+$ octozipo -o joomla -p
 ```
 
 This will target the git.vdm.dev/joomla organization and if a package is unzipped and not found it will push to create that repository.

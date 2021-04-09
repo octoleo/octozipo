@@ -3,8 +3,8 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="1.0.1"
-PROGRAM_V="1.0"
+PROGRAM_VERSION="2.0.0"
+PROGRAM_V="2.0"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
 # Do some prep work
@@ -24,176 +24,145 @@ command -v curl >/dev/null 2>&1 || {
 # main function ˘Ô≈ôﺣ
 main() {
   # make sure the root dir exist
-  if [ -d "$VDM_ROOT_DIR" ]; then
+  if [ -d "$VDM_ZIP_DIR" ]; then
     # go to folder where zip files are placed
-    cd "$VDM_ROOT_DIR" || exit 3
+    cd "$VDM_ZIP_DIR" || exit 3
     # check that the folder has zip files
     # shellcheck disable=SC2012
-    [ "$(ls -1 ./*.zip 2>/dev/null | wc -l)" == 0 ] && showError "looking for zip files, since no zip files in the folder $VDM_ROOT_DIR ERROR-NR" 6
+    [ "$(ls -1 ./*.zip 2>/dev/null | wc -l)" == 0 ] && showError "looking for zip files, since no zip files in the folder $VDM_ZIP_DIR ERROR-NR" 6
     # get all zip files
-    for z in *.zip; do
-      # get folder and repo name
-      repo=$(getRepoName "$z")
-      # check if the repo exist on our system
-      if git ls-remote "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${repo}.git" -q >/dev/null 2>&1; then
-        setExistingRepository "$repo" "$z" || showError "Update Repo:(${repo}) ERROR-NR" 7
+    for zip_name in *.zip; do
+      # get a random folder name
+      folder_name=$( getRandomName 7 )
+      # unzip this zip file
+      _unzip "${zip_name}" "${folder_name}" || {
+        _echo "[error] We encountered and error, we could not unzip ($VDM_ZIP_DIR/$zip_name) in to ($VDM_ZIP_DIR/$folder_name) ERROR-NR 6"
+        # so we skip this package
+        continue
+      }
+      # check if we have a path
+      if [ -d "${VDM_ZIP_DIR}/${folder_name}" ]; then
+        # we change into the unzipped folder
+        cd "${VDM_ZIP_DIR}/${folder_name}" || exit 1
+        # get the package details
+        getPackageDetails "${zip_name}" "${folder_name}"
+        # check if the repo exist on our system
+        if git ls-remote "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" -q >/dev/null 2>&1; then
+          # check if repo is locally found
+          cd "${VDM_PATH_REPO}" >/dev/null 2>&1 || {
+            git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_PATH_REPO}" -q >/dev/null 2>&1
+            _echo "[info] Cloned git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
+          }
+          # set the new files in place
+          setNewFiles || showError "Opening Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
+          # update the existing repo
+          setExistingRepository || showError "Update Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
+        else
+          # create the new folder
+          mkdir -p "${VDM_PATH_REPO}"
+          # set the new files in place
+          setNewFiles || showError "Create Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
+          # setup the new repository
+          setNewRepository || showError "Setup Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
+        fi
+        # remove the random folder
+        rm -fr "${VDM_ZIP_DIR:?}/${folder_name:?}"
+        # remove the zip file
+        if $VDM_KEEP_ZIP || $VDM_KEEP_THIS_ONE; then
+          _echo "[info] Did not remove ${VDM_ZIP_DIR}/${zip_name}"
+        else
+          rm -fr "${VDM_ZIP_DIR:?}/${zip_name:?}"
+        fi
+        # do not remove repo folder when (KEEP) (DRY) (ONE)
+        if $VDM_KEEP_REPO || $DRY || $VDM_KEEP_THIS_ONE; then
+          _echo "[info] Did not remove ${VDM_PATH_REPO}"
+        else
+          # remove the repo directory (we are done)
+          rm -fr "${VDM_PATH_REPO:?}"
+        fi
+        # switch the one back
+        if $VDM_KEEP_THIS_ONE; then
+          VDM_KEEP_THIS_ONE=false
+        fi
+        _echo "================================"
       else
-        setNewRepository "$repo" "$z" || showError "Setup Repo:(${repo}) ERROR-NR" 7
+        showError "opening of folder $VDM_ZIP_DIR/$VDM_FOLDER_NAME as it does not exist ERROR-NR" 5
       fi
     done
   else
-    showError "opening of folder $VDM_ROOT_DIR as it does not exist ERROR-NR" 5
+    showError "opening of folder $VDM_ZIP_DIR as it does not exist ERROR-NR" 5
   fi
 }
 
-# get repository name
-getRepoName() {
-  local name
-  name=$(rightStrip "$1" "-v*")
-  name=$(rightStrip "$name" "_v*")
-  name=$(rightStrip "$name" ".zip")
-  # shellcheck disable=SC2001
-  name=$(echo "$name" | sed 's/[0-9.]//g')
-  name=$(rightStrip "$name" "_")
-  name=$(rightStrip "$name" "-")
-  name=$(getMapped "$name")
-  echo "$name"
-}
-
-# get current version
-getVersion() {
-  local version
-  version=$(leftStrip "$1" "*-v")
-  version=$(leftStrip "$version" "*_v")
-  version=$(rightStrip "$version" ".zip")
-  version=${version//-/\.}
-  version=${version//_/\.}
-  version=$(rightStrip "$version" "..*")
-  # shellcheck disable=SC2001
-  version=$(echo "$version" | sed 's/[^0-9.]//g')
-  version=$(leftStrip "$version" "..")
-  # if we have numbers
-  [[ "$version" =~ [0-9] ]] && echo "$version"
-}
-
-# check that we are in the root folder
-function getVersionPath() {
-  # some locals
-  local filename="$1"
-  local main_path
-  local version
-  local len=100
-  # get all xml (to get version)
-  find . -type f -name '*.xml'  > tmp
-  # now loop the files
-  while IFS= read -r file
-  do
-    # get the version
-    v=$(grep -i '<version>' "$file" | sed 's/[^0-9.]//g')
-    # when we have a version we have a xml that could match
-    if [ -n "$v" ]; then
-      # count the folder depth
-      # shellcheck disable=SC2001
-      p=$(echo "$file" | sed 's|[^/]||g')
-      # keep the value of the shortest path
-      if [[ "${#p}" -lt $len ]]; then
-        # set the directory name
-        main_path="$(dirname "${file}")"
-        # update the length
-        len="${#p}"
-        # set the version
-        version="$v"
-      fi
-    fi
-  done < tmp
-  # remove the tmp file
-  rm tmp
-  # set the root path of the extension
-  VDM_PATH_TO_GO="${2}${main_path#.}"
-  # return the version if found
-  if [ -z "$version" ]; then
-     VDM_PATH_VERSION_GO=$(getVersion "$filename")
-  else
-    VDM_PATH_VERSION_GO="$version"
-  fi
-  # we export this path
-  export VDM_PATH_TO_GO
-  # we export the version
-  export VDM_PATH_VERSION_GO
-}
-
-# Strip pattern from end of string
-rightStrip() {
-  # Usage: rightStrip "string" "pattern"
-  printf '%s\n' "${1%%$2}"
-}
-
-# Strip pattern from start of string
-leftStrip() {
-  # Usage: leftStrip "string" "pattern"
-  printf '%s\n' "${1##$2}"
-}
+#####################################################################################################################VDM
+######################################## Setters
 
 # setup new repository
 setNewRepository() {
-  # some locals
-  local repo_path
-  local zip_path
-  local version
   # give heads up of the new repo
-  _echo "[info] New repository (${VDM_REMOTE_SYSTEM}:${VDM_ORG}/$1)"
-  # set repo path
-  repo_path="$VDM_ROOT_DIR/$1"
-  # set zip path
-  zip_path="$VDM_ROOT_DIR/$2"
-  # we creat the repo dir
-  mkdir -p "$repo_path"
-  # change to this directory and make sure its empty
-  if cd "$repo_path" >/dev/null 2>&1; then
-    rm -rf ./*
-  else
-    return 1
-  fi
-  # we unzip the data to this new folder
-  if unzip "$zip_path" -d "$repo_path" >/dev/null 2>&1; then
-    _echo "[info] Successfully unzipped the package"
-  else
-    return 1
-  fi
-  # set version and correct dir
-  getVersionPath "${2}" "${repo_path}"
-  # check if we have a path
-  # shellcheck disable=SC2164
-  [ -d "${VDM_PATH_TO_GO}" ] && cd "${VDM_PATH_TO_GO}"
-  # set the version
-  [ -n "${VDM_PATH_VERSION_GO}" ] && version="${VDM_PATH_VERSION_GO}"
-  # remove the global values
-  unset VDM_PATH_TO_GO
-  unset VDM_PATH_VERSION_GO
+  _echo "[info] New repository (${VDM_GIT_URL}:${VDM_ORG}/$VDM_REPO_NAME)"
   # we initialize the git repo locally
-  setGitInit "$1" "$version" || return 1
+  setGitInit || return 1
   # check if push create is allowed
-  if ($VDM_PUSH_CREATE); then
-    # we push to create this repo
-    git push -u origin master >/dev/null 2>&1
-    # check if we have tags to push
-    git push --tags >/dev/null 2>&1
-    # always move back to root folder
-    cd "$VDM_ROOT_DIR" || return 1
-    # we remove the ZIP file
-    rm "${zip_path:?}"
-    # we can also remove the folder
-    rm -rf "${repo_path:?}"
+  if $VDM_PUSH_CREATE; then
+    # if dry we dont touch remote repo
+    if $DRY; then
+      _echo "[dry run] git push -u origin master"
+      _echo "[dry run] git push --tags"
+    else
+      # we push to create this repo
+      git push -u origin master >/dev/null 2>&1
+      # check if we have tags to push
+      git push --tags >/dev/null 2>&1
+    fi
     # pushed create
-    _echo "[info] Push created ($1-v$version) repository"
+    _echo "[info] Push created ($VDM_REPO_NAME v$VDM_VERSION) repository"
   else
     # give action info
-    echo "[info] When ready link and push changes to remote"
-    # always move back to root folder
-    cd "$VDM_ROOT_DIR" || return 1
-    # we remove the ZIP file
-    # rm "$zip_path" (don't remove since we may need to run this again if a name of the zip has changed)
+    _echo "[info] When ready link and push changes to remote"
+    # keep this one REPO
+    VDM_KEEP_THIS_ONE=true
   fi
+  return 0
+}
+
+# update repository repository
+setExistingRepository() {
+  # give heads up of the update repo
+  _echo "[info] Update ($VDM_REPO_NAME) existing repository"
+  # lets check if there are changes
+  if [[ -z $(git status --porcelain) ]]; then
+    _echo "[info] No changes found in ($VDM_REPO_NAME v$VDM_VERSION) repository"
+  else
+    if [ "$(git tag -l "v$VDM_VERSION")" ]; then
+      setGitCommit "$VDM_VERSION" "update" || return 4
+    else
+      setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
+    fi
+    # push the changes
+    setPushChanges || return 1
+    # updated the repository
+    _echo "[info] Pushed update to ($VDM_REPO_NAME v$VDM_VERSION) repository"
+  fi
+  # success
+  return 0
+}
+
+# setup new repository
+setNewFiles() {
+  # make sure we are in the correct dir
+  if cd "$VDM_PATH_REPO" >/dev/null 2>&1; then
+    # empty the repo except for dot folders
+    rm -rf "${VDM_PATH_REPO:?}/"*
+    # move all files from unzipped folder to repo folder
+    mv "${VDM_PATH_ZIP}/"* "${VDM_PATH_REPO}"
+    # updated the repository
+    _echo "[info] Files moved to (${VDM_PATH_REPO})"
+  else
+    # we change to this new repository folder
+    return 1
+  fi
+  # success
   return 0
 }
 
@@ -204,21 +173,22 @@ setGitInit() {
     if [[ -z $(git status --porcelain) ]]; then
       _echo "[info] No changes found in repository"
     else
-      if [ -z "$2" ] || [ "$(git tag -l "v$2")" ]; then
-        setGitCommit "$2" "update" || return 4
+      if [ -z "$VDM_VERSION" ] || [ "$(git tag -l "v$VDM_VERSION")" ]; then
+        setGitCommit "$VDM_VERSION" "update" || return 4
       else
-        setGitCommit "$2" "update - v$2" || return 4
+        setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
       fi
     fi
   else
+    # new repo so we initialize it
     git init >/dev/null 2>&1 || return 4
     # check if we have a version number
-    if [ -z "$2" ]; then
-      setGitCommit "$2" "first commit" || return 4
+    if [ -z "$VDM_VERSION" ]; then
+      setGitCommit "$VDM_VERSION" "first commit" || return 4
     else
-      setGitCommit "$2" "first commit - v$2" || return 4
+      setGitCommit "$VDM_VERSION" "first commit - v$VDM_VERSION" || return 4
     fi
-    git remote add origin "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
+    git remote add origin "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
   fi
   return 0
 }
@@ -233,6 +203,8 @@ setGitCommit() {
       return 0
     else
       git tag "v$1" >/dev/null 2>&1 || return 1
+      # updated the repository
+      _echo "[info] Added v$1 tag"
     fi
   fi
   return 0
@@ -240,93 +212,203 @@ setGitCommit() {
 
 # make git commit of the update and set the new tag
 setPushChanges() {
-  git push >/dev/null 2>&1 || return 1
-  git push --tags >/dev/null 2>&1 || return 1
+  # if dry we dont touch remote repo
+  if $DRY; then
+     _echo "[dry run] git push"
+     _echo "[dry run] git push --tags"
+  else
+    git push >/dev/null 2>&1 || return 1
+    git push --tags >/dev/null 2>&1 || return 1
+  fi
   return 0
 }
 
-# update repository repository
-setExistingRepository() {
+#####################################################################################################################VDM
+######################################## Getters
+
+# check that we are in the root folder
+function getPackageDetails() {
   # some locals
-  local repo_path
-  local zip_path
+  local zip_name="${1}"
+  local folder_name="${2}"
+  local path_repo
   local version
-  # give heads up of the update repo
-  _echo "[info] Update ($1) repository"
-  # set repo path
-  repo_path="$VDM_ROOT_DIR/$1"
-  # set zip path
-  zip_path="$VDM_ROOT_DIR/$2"
-  # check if repo is locally found
-  cd "$repo_path" >/dev/null 2>&1 || git clone "git@${VDM_REMOTE_SYSTEM}:${VDM_ORG}/${1}.git"
-  # make sure we are in the correct dir
-  if cd "$repo_path" >/dev/null 2>&1; then
-    rm -rf ./*
-  else
-    return 1
-  fi
-  # now lets unzip the new data to this repo
-  if unzip "$zip_path" -d "$repo_path" >/dev/null 2>&1; then
-    _echo "[info] Successfully unzipped the package"
-  else
-    # break out
-    return 1
-  fi
-  # set version and correct dir
-  getVersionPath "${2}" "${repo_path}"
-  # check if we have a path
-  # shellcheck disable=SC2164
-  [ -d "${VDM_PATH_TO_GO}" ] && cd "${VDM_PATH_TO_GO}"
-  # set the version
-  [ -n "${VDM_PATH_VERSION_GO}" ] && version="${VDM_PATH_VERSION_GO}"
-  # remove the global values
-  unset VDM_PATH_TO_GO
-  unset VDM_PATH_VERSION_GO
-  # lets check if there are changes
-  if [[ -z $(git status --porcelain) ]]; then
-    _echo "[info] No changes found in ($1-v$version) repository"
-  else
-    if [ "$(git tag -l "v$version")" ]; then
-      setGitCommit "$version" "update" || return 4
-    else
-      setGitCommit "$version" "update - v$version" || return 4
+  local name
+  local len=100
+  # get all xml
+  find . -type f -name '*.xml'  > tmp
+  # now loop the files
+  while IFS= read -r file
+  do
+    # only use xml that are not called: config.xml or access.xml or default.xml
+    if [[ "$file" == *"config.xml" ]] || [[ "$file" == *"access.xml" ]] || [[ "$file" == *"default.xml" ]]; then
+      continue
     fi
-    # push the changes
-    setPushChanges || return 1
-    # updated the repository
-    _echo "[info] Pushed update to ($1-v$version) repository"
+    # get the version
+    v=$(grep -o -P '(?<=\<version>).*?(?=\</version>)' "$file")
+    # get the name
+    n=$(grep -o -P '(?<=\<name>).*?(?=\</name>)' "$file")
+    # when we have a version we have a xml that could match
+    if [ -n "$v" ] && [ -n "$n" ]; then
+      # count the folder depth
+      # shellcheck disable=SC2001
+      p=$(echo "$file" | sed 's|[^/]||g')
+      # keep the value of the shortest path
+      if [[ "${#p}" -lt $len ]]; then
+        # set the directory name
+        path_repo="$(dirname "${file}")"
+        # update the length
+        len="${#p}"
+        # set the version
+        version="$v"
+        # set the name
+        name="$n"
+      fi
+    fi
+    # clear on each loop
+    unset v
+    unset n
+  done < tmp
+  # remove the tmp file
+  rm tmp
+  # set the repo path of the extension
+  VDM_PATH_ZIP="${VDM_ZIP_DIR}/${folder_name}${path_repo#.}"
+  # return the version if found
+  if [ -z "$version" ]; then
+     VDM_VERSION=$(getVersionNumberByFile "$zip_name")
+  else
+    VDM_VERSION="$version"
   fi
-  # always move back to root folder
-  cd "$VDM_ROOT_DIR" || return 1
-  # we remove the ZIP file
-  rm "${zip_path:?}"
-  # we can also remove the folder
-  rm -rf "${repo_path:?}"
-  # success
-  return 0
+  # return the name if found
+  if $VDM_USE_XML_NAME && [ -n "$name" ]; then
+    name=$(getRepoName "${name}")
+  else
+    name=$(getRepoName "${zip_name}")
+  fi
+  # possible in package mapper
+  env_file="${VDM_ZIP_DIR}/${folder_name}/.${PROGRAM_CODE}"
+  # check if we have a file
+  if [ -f "${env_file}" ]; then
+    # get the repository name
+    env_name=$( grep "repo_name=" "${env_file}" | cut -d'=' -f2)
+  fi
+  # check if we have a mapped repo name
+  VDM_REPO_NAME=$(getMapped "${env_name:-$name}")
+  # always clear the evn_name
+  unset env_name
+  # set the repo path of the extension
+  VDM_PATH_REPO="${VDM_ZIP_DIR}/${VDM_REPO_NAME}"
 }
 
 # get mapped name
 function getMapped() {
-  local PROP_KEY="$1"
-  local PROP_VALUE
+  local prop_key="${1}"
+  local prop_value
   if [ -f "${VDM_MAPPER_FILE_PATH}" ]; then
     # get the value if set
-    PROP_VALUE=$( grep "$PROP_KEY" "${VDM_MAPPER_FILE_PATH}" | cut -d'=' -f2)
+    prop_value=$( grep "$prop_key" "${VDM_MAPPER_FILE_PATH}" | cut -d'=' -f2)
   fi
-  echo "${PROP_VALUE:-$PROP_KEY}"
+  echo "${prop_value:-$prop_key}"
+}
+
+# return a random name
+function getRandomName() {
+  # simple basic random
+  # shellcheck disable=SC2046
+  # shellcheck disable=SC2005
+  echo $(tr -dc 'A-HJ-NP-Za-km-z' </dev/urandom | dd bs="${1:-128}" count=1 status=none)
+}
+
+# get repository name
+getRepoName() {
+  local name="${1}"
+  # be sure to first remove the Joomla
+  # version from the file name if set
+  name="${name//__J3/}"
+  name="${name//__J4/}"
+  # make all lower
+  name="${name,,}"
+  # trim away the .zip
+  name="${name%%.zip}"
+  # get version variation
+  tmp_v_underscore="${VDM_VERSION//./_}"
+  tmp_v_dash="${VDM_VERSION//./\-}"
+  # remove the version
+  name="${name//v$VDM_VERSION/ }"
+  name="${name//v$tmp_v_underscore/ }"
+  name="${name//v$tmp_v_dash/ }"
+  # remove all none safe URL characters
+  name="${name//[^a-z0-9_\- ]/ }"
+  # convert all _ to space
+  name="${name//_/ }"
+  # convert a - to space
+  name="${name//\-/ }"
+  # remove all double spaces
+  name=$(echo "${name}" | tr -s "[:blank:]" | xargs)
+  # convert all space to -
+  name="${name//[[:space:]]/$VDM_SPACER}"
+  # done (we have our name)
+  echo "${name}"
+}
+
+# get current version
+getVersionNumberByFile() {
+  local version="${1}"
+  version=$(leftStrip "$version" "*-v")
+  version=$(leftStrip "$version" "*_v")
+  version=$(rightStrip "$version" ".zip")
+  version=${version//-/\.}
+  version=${version//_/\.}
+  version=$(rightStrip "$version" "..*")
+  # shellcheck disable=SC2001
+  version=$(echo "$version" | sed 's/[^0-9.]//g')
+  version=$(leftStrip "$version" "..")
+  # if we have numbers
+  if [[ "$version" =~ [0-9] ]]; then
+    echo "$version"
+  else
+    echo "1.0.0"
+  fi
+}
+
+#####################################################################################################################VDM
+######################################## General Methods
+
+# Strip pattern from end of string
+function rightStrip() {
+  # Usage: rightStrip "string" "pattern"
+  printf '%s\n' "${1%%$2}"
+}
+
+# Strip pattern from start of string
+function leftStrip() {
+  # Usage: leftStrip "string" "pattern"
+  printf '%s\n' "${1##$2}"
+}
+
+# to unzip
+function _unzip() {
+  # set some locals
+  local zip_name="${1}"
+  local folder_name="${2}"
+  # we unzip the data to this new folder
+  if unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name" >/dev/null 2>&1; then
+    _echo "[info] Successfully unzipped the package ($zip_name)"
+    return 0
+  fi
+  return 1
 }
 
 # only if not set to be quiet
 function _echo() {
-  if (("$QUIET" == 0)); then
+  if ! $QUIET; then
     echo "$1"
   fi
 }
 
 # show an error
 showError() {
-  echo "[error] We encountered and error on $1:$2"
+  _echo "[error] We encountered and error on $1:$2"
   exit "$2"
 }
 
@@ -335,7 +417,7 @@ function runUninstall() {
   # now remove the script
   if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
     sudo rm -f "/usr/local/bin/${PROGRAM_CODE}"
-    echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} has been completely uninstalled."
+    _echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} has been completely uninstalled."
   else
     echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} is not installed."
   fi
@@ -375,11 +457,43 @@ function runUpdate() {
   exit 0
 }
 
+# set the defaults
+VDM_ZIP_DIR="$PWD"
+VDM_ORG="joomla"
+VDM_GIT_URL="git.vdm.dev"
+VDM_PUSH_CREATE=false
+VDM_USE_XML_NAME=false
+VDM_KEEP_ZIP=false
+VDM_KEEP_REPO=false
+VDM_KEEP_THIS_ONE=false
+VDM_SPACER='-'
+DRY=false
+QUIET=false
+DEBUG=false
+
 # help message ʕ•ᴥ•ʔ
 function show_help() {
   cat <<EOF
 Usage: ${PROGRAM_CODE} [OPTION...]
 	Options
+	======================================================
+   -o | --org=[ORG]
+	directory of the org/user repository
+	default: joomla
+	example: ${PROGRAM_CODE} -o=joomla
+	example: ${PROGRAM_CODE} --org=joomla
+	======================================================
+   -z | --zip-dir=<full-path-to-directory>
+	full path to directory of the zip files
+	default: $PWD
+	example: ${PROGRAM_CODE} -z=/home/username/zipfiles
+	example: ${PROGRAM_CODE} --zip-dir=/home/username/zipfiles
+	======================================================
+   -g | --git-url=<url>
+	git remote repository base url
+	default: git.vdm.dev
+	example: ${PROGRAM_CODE} -g=git.vdm.dev
+	example: ${PROGRAM_CODE} --git-url=git.vdm.dev
 	======================================================
    -m | --mapper=<file>
 	load the mapping file
@@ -390,9 +504,41 @@ Usage: ${PROGRAM_CODE} [OPTION...]
 	load the environment variables file
 	example: ${PROGRAM_CODE} --env=/src/.env
 	======================================================
+   -p | --push-create
+	switch to try push create new repositories
+	this may not work with github
+	example: ${PROGRAM_CODE} -p
+	example: ${PROGRAM_CODE} --push-create
+	======================================================
+   -s | --spacer=<char>
+	set the spacer used in repo name
+	default: -
+	example: ${PROGRAM_CODE} -s _
+	example: ${PROGRAM_CODE} --spacer=_
+	======================================================
+   --keep-repo
+	switch to keep the repository directory
+	example: ${PROGRAM_CODE} --keep-repo
+	======================================================
+   --keep-zip
+	switch to keep the zip file
+	example: ${PROGRAM_CODE} --keep-zip
+	======================================================
+   --use-xml-name
+	use the name found in the xml as the repository name
+	example: ${PROGRAM_CODE} --use-xml-name
+	======================================================
+   -d | --dry
+	dry run of the program
+	example: ${PROGRAM_CODE} --dry
+	======================================================
    -q | --quiet
 	mute all output messages
 	example: ${PROGRAM_CODE} --quiet
+	======================================================
+   --debug
+	tp print out all config details
+	example: ${PROGRAM_CODE} --debug
 	======================================================
    --update
 	to update your install
@@ -412,13 +558,6 @@ Usage: ${PROGRAM_CODE} [OPTION...]
 EOF
 }
 
-# set the defaults
-VDM_ORG="octoleo"
-VDM_ROOT_DIR="$PWD"
-VDM_REMOTE_SYSTEM="git.vdm.dev"
-VDM_PUSH_CREATE=false
-QUIET=0
-
 # check if we have options
 while :; do
   case $1 in
@@ -427,7 +566,121 @@ while :; do
     exit
     ;;
   -q | --quiet)
-    QUIET=1
+    QUIET=true
+    ;;
+  -d | --dry)
+    DRY=true
+    ;;
+  --keep-zip)
+    VDM_KEEP_ZIP=true
+    ;;
+  --keep-repo)
+    VDM_KEEP_REPO=true
+    ;;
+  --use-xml-name)
+    VDM_USE_XML_NAME=true
+    ;;
+  -p | --push-create)
+    VDM_PUSH_CREATE=true
+    ;;
+  -z | --zip-dir) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_ZIP_DIR=$2
+      shift
+    else
+      _echo '[error] "--zip-dir" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -z=?* | --zip-dir=?*)
+    VDM_ZIP_DIR=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -z= | --zip-dir=) # Handle the case of an empty --packages=
+    _echo '[error] "--zip-dir=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  -g | --git-url) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_GIT_URL=$2
+      shift
+    else
+      _echo '[error] "--git-url" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -g=?* | --git-url=?*)
+    VDM_GIT_URL=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -g= | --git-url=) # Handle the case of an empty --packages=
+    _echo '[error] "--git-url=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  -o | --org) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_ORG=$2
+      shift
+    else
+      _echo '[error] "--org" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -o=?* | --org=?*)
+    VDM_ORG=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -o= | --org=) # Handle the case of an empty --packages=
+    _echo '[error] "--org=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  -s | --spacer) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_SPACER=$2
+      shift
+    else
+      _echo '[error] "--spacer" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -s=?* | --spacer=?*)
+    VDM_SPACER=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -s= | --spacer=) # Handle the case of an empty --packages=
+    _echo '[error] "--spacer=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  -e | --env) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_ENV_FILE_PATH=$2
+      shift
+    else
+      _echo '[error] "--env" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -e=?* | --env=?*)
+    VDM_ENV_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -e= | --env=) # Handle the case of an empty --packages=
+    _echo '[error] "--env=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  -m | --mapper) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_MAPPER_FILE_PATH=$2
+      shift
+    else
+      _echo '[error] "--mapper" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -m=?* | --mapper=?*)
+    VDM_MAPPER_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  -m= | --mapper=) # Handle the case of an empty --packages=
+    _echo '[error] "--mapper=" requires a non-empty option argument.'
+    exit 17
+    ;;
+  --debug)
+    DEBUG=true
     ;;
   --uninstall)
     runUninstall
@@ -437,38 +690,6 @@ while :; do
     runUpdate
     shift
     ;;
-  -e | --env) # Takes an option argument; ensure it has been specified.
-    if [ "$2" ]; then
-      VDM_ENV_FILE_PATH=$2
-      shift
-    else
-      echo '[error] "--env" requires a non-empty option argument.'
-      exit 17
-    fi
-    ;;
-  -e=?* | --env=?*)
-    VDM_ENV_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
-    ;;
-  -e= | --env=) # Handle the case of an empty --packages=
-    echo '[error] "--env=" requires a non-empty option argument.'
-    exit 17
-    ;;
-  -m | --mapper) # Takes an option argument; ensure it has been specified.
-    if [ "$2" ]; then
-      VDM_MAPPER_FILE_PATH=$2
-      shift
-    else
-      echo '[error] "--mapper" requires a non-empty option argument.'
-      exit 17
-    fi
-    ;;
-  -m=?* | --mapper=?*)
-    VDM_MAPPER_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
-    ;;
-  -m= | --mapper=) # Handle the case of an empty --packages=
-    echo '[error] "--mapper=" requires a non-empty option argument.'
-    exit 17
-    ;;
   *) # Default case: No more options, so break out of the loop.
     break ;;
   esac
@@ -476,34 +697,79 @@ while :; do
 done
 
 # the environment variables path
-tmp_path="$VDM_ROOT_DIR/.${PROGRAM_CODE}"
+tmp_path="$VDM_ZIP_DIR/.${PROGRAM_CODE}"
 # if path not set try global path
 [ -f "$tmp_path" ] || tmp_path="/home/$USER/.config/${PROGRAM_CODE}/.env"
-tmp_path="${VDM_ENV_FILE_PATH:-$tmp_path}"
+: "${VDM_ENV_FILE_PATH:=$tmp_path}"
 # add env to system
-if [ -f "${tmp_path}" ]; then
+if [ -f "${VDM_ENV_FILE_PATH}" ]; then
   # shellcheck disable=SC1090
-  source "${tmp_path}"
+  source "${VDM_ENV_FILE_PATH}"
 fi
 # the mapper path
-tmp_path="$VDM_ROOT_DIR/.${PROGRAM_CODE}.mapper"
+tmp_path="$VDM_ZIP_DIR/.${PROGRAM_CODE}.mapper"
 # if path not set try global path
 [ -f "$tmp_path" ] || tmp_path="/home/$USER/.config/${PROGRAM_CODE}/.mapper"
-VDM_MAPPER_FILE_PATH="${VDM_MAPPER_FILE_PATH:-$tmp_path}"
+: "${VDM_MAPPER_FILE_PATH:=$tmp_path}"
 # done with the tmp_path
 unset tmp_path
 
-# catch the values passed
-VDM_ORG="${1:-$VDM_ORG}"
-VDM_PUSH_CREATE="${2:-$VDM_PUSH_CREATE}"
-VDM_ROOT_DIR="${3:-$VDM_ROOT_DIR}"
-VDM_REMOTE_SYSTEM="${4:-$VDM_REMOTE_SYSTEM}"
+# dynamic defaults
+VDM_PATH_REPO=''
+VDM_PATH_ZIP=''
+VDM_VERSION=''
+VDM_REPO_NAME=''
 
-# show globals if DEBUG
-# echo "$VDM_ORG"
-# echo "$VDM_ROOT_DIR"
-# echo "$VDM_REMOTE_SYSTEM"
-# exit
+# debug config values
+if $DEBUG; then
+# show globals
+cat <<EOF
+	Options: VALUES
+	======================================================
+   -o | --org=[ORG]
+	VALUE: $VDM_ORG
+	======================================================
+   -z | --zip-dir=<full-path-to-directory>
+	VALUE: $VDM_ZIP_DIR
+	======================================================
+   -g | --git-url=<url>
+	VALUE: $VDM_GIT_URL
+	======================================================
+   -m | --mapper=<file>
+	VALUE: $VDM_MAPPER_FILE_PATH
+	======================================================
+   -e | --env=<file>
+	VALUE: $VDM_ENV_FILE_PATH
+	======================================================
+   -p | --push-create
+	VALUE: $VDM_PUSH_CREATE
+	======================================================
+   -s | --spacer=<char>
+	VALUE: $VDM_SPACER
+	======================================================
+   --keep-repo
+	VALUE: $VDM_KEEP_REPO
+	======================================================
+   --keep-zip
+	VALUE: $VDM_KEEP_ZIP
+	======================================================
+   --use-xml-name
+	VALUE: $VDM_USE_XML_NAME
+	======================================================
+   -d | --dry
+	VALUE: $DRY
+	======================================================
+   -q | --quiet
+	VALUE: $QUIET
+	======================================================
+   --debug
+	VALUE: $DEBUG
+	======================================================
+			${PROGRAM_NAME} v${PROGRAM_VERSION}
+	======================================================
+EOF
+  exit 0
+fi
 
 # run main
 main
