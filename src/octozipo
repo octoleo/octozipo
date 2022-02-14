@@ -470,6 +470,7 @@ VDM_SPACER='-'
 DRY=false
 QUIET=false
 DEBUG=false
+GIT_DATE_FORMAT="%b %e %X %Y %z"
 
 # help message ʕ•ᴥ•ʔ
 function show_help() {
@@ -515,6 +516,11 @@ Usage: ${PROGRAM_CODE} [OPTION...]
 	default: -
 	example: ${PROGRAM_CODE} -s _
 	example: ${PROGRAM_CODE} --spacer=_
+	======================================================
+   --git-date=<date>
+	set the git commit date
+	default: Actual Date
+	example: ${PROGRAM_CODE} --git-date="Feb 14 03:18:31"
 	======================================================
    --keep-repo
 	switch to keep the repository directory
@@ -631,6 +637,22 @@ while :; do
     _echo '[error] "--org=" requires a non-empty option argument.'
     exit 17
     ;;
+  --git-date) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_GIT_DATE=$2
+      shift
+    else
+      _echo '[error] "--git-date" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  --git-date=?*)
+    VDM_GIT_DATE=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  --git-date=) # Handle the case of an empty --packages=
+    _echo '[error] "--git-date=" requires a non-empty option argument.'
+    exit 17
+    ;;
   -s | --spacer) # Takes an option argument; ensure it has been specified.
     if [ "$2" ]; then
       VDM_SPACER=$2
@@ -714,6 +736,21 @@ tmp_path="$VDM_ZIP_DIR/.${PROGRAM_CODE}.mapper"
 # done with the tmp_path
 unset tmp_path
 
+# set the git date
+if [ -n "$VDM_GIT_DATE" ]; then
+        # make sure the format is correct
+        GIT_AUTHOR_DATE=$( date --date="$VDM_GIT_DATE" +"$GIT_DATE_FORMAT")
+else
+        # set today's date
+        GIT_AUTHOR_DATE=$( date +"$GIT_DATE_FORMAT")
+fi
+# set the git committer date
+GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+
+# now make globally available to git
+export GIT_AUTHOR_DATE
+export GIT_COMMITTER_DATE
+
 # dynamic defaults
 VDM_PATH_REPO=''
 VDM_PATH_ZIP=''
@@ -747,6 +784,9 @@ cat <<EOF
    -s | --spacer=<char>
 	VALUE: $VDM_SPACER
 	======================================================
+   --git-date=<date>
+	VALUE: $VDM_GIT_DATE
+	======================================================
    --keep-repo
 	VALUE: $VDM_KEEP_REPO
 	======================================================
@@ -773,3 +813,7 @@ fi
 
 # run main
 main
+
+# clear globals
+unset GIT_AUTHOR_DATE
+unset GIT_COMMITTER_DATE

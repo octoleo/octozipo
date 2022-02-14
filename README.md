@@ -81,6 +81,11 @@ Usage: octozipo [OPTION...]
         example: octozipo -s _
         example: octozipo --spacer=_
         ======================================================
+   --git-date=<date>
+        set the git commit date
+        default: Actual Date
+        example: octozipo --git-date="Feb 14 03:18:31"
+        ======================================================
    --keep-repo
         switch to keep the repository directory
         example: octozipo --keep-repo
@@ -118,7 +123,7 @@ Usage: octozipo [OPTION...]
         example: octozipo -h
         example: octozipo --help
         ======================================================
-                        Octozipo v1.1.0
+                        Octozipo v2.0.0
         ======================================================
 ```
 ### Example
