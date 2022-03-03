@@ -248,8 +248,10 @@ function getPackageDetails() {
     v=$(grep -o -P '(?<=\<version>).*?(?=\</version>)' "$file")
     # get the name
     n=$(grep -o -P '(?<=\<name>).*?(?=\</name>)' "$file")
+    # check for an update server file (we must not use it)
+    e=$(grep -o -P '\<extension' "$file")
     # when we have a version we have a xml that could match
-    if [ -n "$v" ] && [ -n "$n" ]; then
+    if [ -n "$v" ] && [ -n "$n" ] && [ -n "$e" ]; then
       # count the folder depth
       # shellcheck disable=SC2001
       p=$(echo "$file" | sed 's|[^/]||g')
@@ -268,6 +270,7 @@ function getPackageDetails() {
     # clear on each loop
     unset v
     unset n
+    unset e
   done < tmp
   # remove the tmp file
   rm tmp
