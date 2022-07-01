@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.0.0"
+PROGRAM_VERSION="2.0.1"
 PROGRAM_V="2.0"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -434,7 +434,7 @@ function runUpdate() {
     sudo mv "/usr/local/bin/${PROGRAM_CODE}" "/usr/local/bin/${PROGRAM_CODE}.bak"
   fi
   # pull the latest version. Master is always the latest
-  if sudo curl --fail -L "https://git.vdm.dev/api/v1/repos/octoleo/${PROGRAM_CODE}/raw/src/${PROGRAM_CODE}?ref=${branch:-master}" -o "/usr/local/bin/${PROGRAM_CODE}" 2>/dev/null; then
+  if sudo curl --fail -L "https://git.vdm.dev/api/v1/repos/octoleo/${PROGRAM_CODE}/raw/src/${PROGRAM_CODE}?ref=${branch:-master}&access_token=${VDM_ACCESS_TOKEN}" -o "/usr/local/bin/${PROGRAM_CODE}" 2>/dev/null; then
     # give success message
     _echo "[success] Update was successful."
     # do we have a backup
@@ -474,6 +474,9 @@ DRY=false
 QUIET=false
 DEBUG=false
 GIT_DATE_FORMAT="%b %e %X %Y %z"
+
+# load the access token
+VDM_ACCESS_TOKEN="${SETUP_TOKEN:-}"
 
 # help message ʕ•ᴥ•ʔ
 function show_help() {
@@ -552,6 +555,10 @@ Usage: ${PROGRAM_CODE} [OPTION...]
    --update
 	to update your install
 	example: ${PROGRAM_CODE} --update
+	======================================================
+   -t | --access-token [********token**********]
+	token needed to access private repo for update
+	example: ${PROGRAM_CODE} --access-token='********token**********'
 	======================================================
    --uninstall
 	to uninstall this script
@@ -704,6 +711,18 @@ while :; do
     _echo '[error] "--mapper=" requires a non-empty option argument.'
     exit 17
     ;;
+  -t | --access-token) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_ACCESS_TOKEN=$2
+      shift
+    else
+      _echo '[error] "--token" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  -t=?* | --access-token=?*)
+    VDM_ACCESS_TOKEN=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
   --debug)
     DEBUG=true
     ;;
@@ -807,6 +826,9 @@ cat <<EOF
 	======================================================
    --debug
 	VALUE: $DEBUG
+	======================================================
+   -t | --token=[token]
+	VALUE: $VDM_ACCESS_TOKEN
 	======================================================
 			${PROGRAM_NAME} v${PROGRAM_VERSION}
 	======================================================
