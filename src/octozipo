@@ -1,4 +1,4 @@
-#! /bin/bash
+﻿#!/bin/bash
 
 # Program name
 PROGRAM_NAME="Octozipo"
@@ -21,7 +21,35 @@ command -v curl >/dev/null 2>&1 || {
   exit 1
 }
 
-# main function ˘Ô≈ôﺣ
+# main ˘Ô≈ôﺣ - The main function that controls the flow of the script
+#
+# This is the main function of the script, which controls the flow of execution and performs the following tasks:
+#
+# 1. Verifies that the root directory exists
+# 2. Loops through all the zip files in the root directory
+# 3. Unzips the current zip file to a random folder
+# 4. Extracts package details from the unzipped folder
+# 5. Checks if the repository exists on the system, and updates the existing repository if found
+# 6. Sets up a new repository if it does not exist
+# 7. Removes the random folder and the zip file (unless specified to keep)
+# 8. Removes the repository folder (unless specified to keep)
+#
+# Global Variables:
+#   VDM_ZIP_DIR: The root directory where the zip files are stored
+#   VDM_GIT_URL: The URL of the Git repository
+#   VDM_ORG: The name of the organization on the Git repository
+#   VDM_REPO_NAME: The name of the repository
+#   VDM_PATH_REPO: The path to the repository on the local system
+#   VDM_KEEP_ZIP: A flag to indicate whether to keep the zip file after processing
+#   VDM_KEEP_REPO: A flag to indicate whether to keep the repository folder after processing
+#   VDM_KEEP_THIS_ONE: A flag to indicate whether to keep the current processed file
+#   DRY: A flag to indicate whether the script is in dry run mode
+#
+# Arguments:
+#   None
+#
+# Returns:
+#   None
 main() {
   # make sure the root dir exist
   if [ -d "$VDM_ZIP_DIR" ]; then
@@ -97,7 +125,23 @@ main() {
 #####################################################################################################################VDM
 ######################################## Setters
 
-# setup new repository
+# setNewRepository - Creates a new remote repository
+#
+# setNewRepository initializes a new local Git repository and pushes it to a remote repository. The remote repository
+# is specified by the global variables `VDM_GIT_URL` and `VDM_ORG`. The repository name is specified by the global
+# variable `VDM_REPO_NAME`. If the global variable `VDM_PUSH_CREATE` is set to true, the local repository will be pushed
+# to the remote repository. If `VDM_PUSH_CREATE` is set to false or if `DRY` is set to true, the function will only
+# initialize the local repository.
+#
+# Global Variables:
+#   VDM_GIT_URL - the URL of the remote Git repository
+#   VDM_ORG - the name of the organization on the remote Git repository
+#   VDM_REPO_NAME - the name of the repository
+#   VDM_PUSH_CREATE - a flag indicating whether or not to push the new repository to the remote
+#   DRY - a flag indicating whether or not to perform a dry run
+#
+# Returns:
+#   0 if the function completed successfully, 1 if an error occurred
 setNewRepository() {
   # give heads up of the new repo
   _echo "[info] New repository (${VDM_GIT_URL}:${VDM_ORG}/$VDM_REPO_NAME)"
@@ -126,195 +170,390 @@ setNewRepository() {
   return 0
 }
 
-# update repository repository
+# setExistingRepository - Updates an existing repository
+#
+# This function updates an existing repository. The function first checks if there are any changes in the repository.
+# If there are no changes, the function notifies the user. If there are changes, the function creates a commit with a
+# message that contains the current version number and updates the repository with these changes. If the push is
+# successful, the function notifies the user. If the push is unsuccessful, the function returns an error code of 1.
+#
+# Global Variables:
+#   VDM_REPO_NAME - The name of the repository being updated.
+#   VDM_VERSION - The current version of the repository being updated.
+#
+# Returns:
+#   0 - The function has completed successfully.
+#   4 - An error occurred while creating the commit.
+#   1 - An error occurred while pushing the changes.
 setExistingRepository() {
-  # give heads up of the update repo
+  # Notifies the user that the existing repository is being updated.
   _echo "[info] Update ($VDM_REPO_NAME) existing repository"
-  # lets check if there are changes
+
+  # Checks if there are any changes in the repository.
   if [[ -z $(git status --porcelain) ]]; then
+    # If there are no changes, inform the user.
     _echo "[info] No changes found in ($VDM_REPO_NAME v$VDM_VERSION) repository"
   else
-    if [ "$(git tag -l "v$VDM_VERSION")" ]; then
-      setGitCommit "$VDM_VERSION" "update" || return 4
-    else
-      setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
+    # If there are changes, create a commit message.
+    commit_msg="update"
+    if ! [ "$(git tag -l "v$VDM_VERSION")" ]; then
+      commit_msg="$commit_msg - v$VDM_VERSION"
     fi
-    # push the changes
+
+    # Creates a commit with the message and returns an error code of 4 if unsuccessful.
+    setGitCommit "$VDM_VERSION" "$commit_msg" || return 4
+
+    # Pushes the changes and returns an error code of 1 if unsuccessful.
     setPushChanges || return 1
-    # updated the repository
+
+    # Notifies the user that the changes have been pushed to the repository.
     _echo "[info] Pushed update to ($VDM_REPO_NAME v$VDM_VERSION) repository"
   fi
-  # success
+
+  # Return 0 if the function has completed successfully.
   return 0
 }
 
-# setup new repository
+# setNewFiles - Copies files from unzipped folder to repository folder
+#
+# setNewFiles copies all files from the unzipped folder to the repository folder, removing any existing files
+# in the repository folder. This function changes to the repository folder and uses the 'mv' command to move
+# all files from the unzipped folder to the repository folder. If the function is unable to change to the
+# repository folder, an error code of 1 is returned.
+#
+# Global Variables:
+#   VDM_PATH_REPO: the file path of the repository folder
+#   VDM_PATH_ZIP: the file path of the unzipped folder
+#
+# Returns:
+#   0 if the function has completed successfully
+#   1 if the function was unable to change to the repository folder
+
 setNewFiles() {
-  # make sure we are in the correct dir
+  # Changes to the correct directory.
   if cd "$VDM_PATH_REPO" >/dev/null 2>&1; then
-    # empty the repo except for dot folders
+    # Removes all files in the repository, except for dot folders.
     rm -rf "${VDM_PATH_REPO:?}/"*
-    # move all files from unzipped folder to repo folder
+
+    # Moves all files from the unzipped folder to the repository folder.
     mv "${VDM_PATH_ZIP}/"* "${VDM_PATH_REPO}"
-    # updated the repository
+
+    # Notifies the user that the files have been moved to the repository folder.
     _echo "[info] Files moved to (${VDM_PATH_REPO})"
   else
-    # we change to this new repository folder
+    # Returns an error code of 1 if unable to change to the repository folder.
     return 1
   fi
-  # success
+
+  # Return 0 if the function has completed successfully.
   return 0
 }
 
-# make git commit of the update and set the new tag
+# setGitInit - Initializes the Git repository or creates a new commit if changes exist
+#
+# setGitInit checks if the current directory is a Git repository. If it is, it checks if there are any changes in the repository.
+# If there are no changes, it informs the user. If there are changes, it checks if a Git tag with the version number exists.
+# If the tag does not exist or if there is no version number, it creates a commit with the "update" message.
+# If the tag does exist, it creates a commit with the "update - v$VDM_VERSION" message.
+# If the current directory is not a Git repository, it initializes the directory as a Git repository, creates a first commit
+# with the "first commit" or "first commit - v$VDM_VERSION" message, and adds a remote origin for the Git repository.
+#
+# Global Variables:
+#   VDM_VERSION - the version number to be used in the commit message
+#   VDM_GIT_URL - the URL of the remote Git repository
+#   VDM_ORG - the name of the organization that contains the remote Git repository
+#   VDM_REPO_NAME - the name of the remote Git repository
+#
+# Returns:
+#   0 - if the function has completed successfully
+#   4 - if an error occurs during the creation of a commit
 setGitInit() {
-  # check if this is an existing local repo
-  if [ -d ".git" ]; then
-    if [[ -z $(git status --porcelain) ]]; then
+  # Checks if the current directory is a Git repository.
+  if git rev-parse --git-dir > /dev/null 2>&1; then
+    # If it is, checks if there are any changes in the repository.
+    if git diff-index --quiet HEAD --; then
+      # If there are no changes, inform the user.
       _echo "[info] No changes found in repository"
     else
-      if [ -z "$VDM_VERSION" ] || [ "$(git tag -l "v$VDM_VERSION")" ]; then
+      # If there are changes, check if a Git tag with the version number exists.
+      if [ -z "$VDM_VERSION" ] || git tag -l "v$VDM_VERSION" > /dev/null 2>&1; then
+        # If it does not exist or if there is no version number, create a commit with the "update" message.
+        # Return an error code of 4 if unsuccessful.
         setGitCommit "$VDM_VERSION" "update" || return 4
       else
+        # If the tag does exist, create a commit with the "update - v$VDM_VERSION" message.
+        # Return an error code of 4 if unsuccessful.
         setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
       fi
     fi
   else
-    # new repo so we initialize it
+    # If the current directory is not a Git repository, initialize it.
     git init >/dev/null 2>&1 || return 4
-    # check if we have a version number
+
+    # Check if there is a version number.
     if [ -z "$VDM_VERSION" ]; then
+      # If there is no version number, create a commit with the "first commit" message.
+      # Return an error code of 4 if unsuccessful.
       setGitCommit "$VDM_VERSION" "first commit" || return 4
     else
+      # If there is a version number, create a commit with the "first commit - v$VDM_VERSION" message.
+      # Return an error code of 4 if unsuccessful.
       setGitCommit "$VDM_VERSION" "first commit - v$VDM_VERSION" || return 4
     fi
+
+    # Add a remote origin for the Git repository.
     git remote add origin "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
   fi
+
+  # Return 0 if the function has completed successfully.
   return 0
 }
 
-# make git commit of the update and set the new tag
+# setGitCommit - Makes a Git commit with a specified commit message and creates a Git tag
+#
+# setGitCommit adds all changes to the Git index, makes a Git commit with the specified commit message,
+# and, if a version number is provided, creates a new Git tag for the commit.
+#
+# Arguments:
+#   1: the version number (optional)
+#   2: the commit message
+#
+# Returns:
+#   0: if the function has completed successfully
+#   1: if the commit or tag creation was unsuccessful
 setGitCommit() {
+  # Adds all changes to the Git index.
   git add . >/dev/null 2>&1 || return 1
-  git commit -am"$2" >/dev/null 2>&1 || return 1
-  # check if tag exist
+
+  # Makes a Git commit with the specified commit message.
+  if ! git commit -am"$2" >/dev/null 2>&1; then
+    # Return an error code of 1 if the commit was unsuccessful.
+    return 1
+  fi
+
+  # If a version number is provided, create a new Git tag for the commit.
   if [ -n "$1" ]; then
-    if [ "$(git tag -l "v$1")" ]; then
-      return 0
-    else
-      git tag "v$1" >/dev/null 2>&1 || return 1
-      # updated the repository
+    # Check if the tag already exists.
+    if ! git tag -l "v$1" >/dev/null 2>&1; then
+      # If the tag does not exist, create it.
+      if ! git tag "v$1" >/dev/null 2>&1; then
+        # Return an error code of 1 if the tag creation was unsuccessful.
+        return 1
+      fi
+
+      # Notify the user that the tag was added.
       _echo "[info] Added v$1 tag"
     fi
   fi
+
+  # Return 0 if the function has completed successfully.
   return 0
 }
 
-# make git commit of the update and set the new tag
+# setPushChanges - Pushes the changes and tags to the remote repository
+#
+# setPushChanges tries to push the changes and tags to the remote repository. If the DRY variable is set to true,
+# a message indicating that this is a dry run and no changes will be made will be printed. Otherwise, the changes
+# and tags will be pushed to the remote repository. Stdout and stderr are redirected to /dev/null to suppress output.
+#
+# Global Variables:
+#   DRY: a boolean indicating whether this is a dry run or not
+#
+# Arguments:
+#   None
+#
+# Returns:
+#   0 if the function has completed successfully, 1 if the push was unsuccessful
 setPushChanges() {
-  # if dry we dont touch remote repo
+  # If the DRY variable is set to true, print a message indicating that this is a dry run and no changes will be made.
   if $DRY; then
      _echo "[dry run] git push"
      _echo "[dry run] git push --tags"
   else
+    # If the DRY variable is not set, try to push the changes and tags to the remote repository.
+    # Redirect stdout and stderr to /dev/null to suppress output.
     git push >/dev/null 2>&1 || return 1
     git push --tags >/dev/null 2>&1 || return 1
   fi
+
+  # Return 0 if the function has completed successfully.
   return 0
 }
 
 #####################################################################################################################VDM
 ######################################## Getters
 
-# check that we are in the root folder
-function getPackageDetails() {
-  # some locals
+# Get Package Details - Retrieve information about a package
+#
+# This function retrieves information about a package, including the repository path, version number, and name.
+# The function begins by creating a list of all XML files in the current directory and looping through each file.
+# The version number and name are retrieved from the XML file if it is not an update server file.
+# If a version number is not found, it is retrieved from the file name using the `getVersionNumberByFile` function.
+# The name can either be retrieved from the XML file or the file name, depending on the value of the `VDM_USE_XML_NAME` variable.
+# If an environment file exists for the package, the repository name is retrieved from the file.
+# If a mapping exists for the repository name, it is used instead of the original name.
+# Finally, the repository path for the package is set.
+#
+# Global Variables:
+#   VDM_ZIP_DIR: the path to the directory containing the package zip files
+#   VDM_USE_XML_NAME: a boolean indicating whether to use the name from the XML file or the file name
+#   PROGRAM_CODE: the code used to identify the environment file
+#   VDM_MAPPER_FILE_PATH: the path to the file containing the repository name mappings
+#   VDM_SPACER: the character used to separate words in the repository name
+#
+# Arguments:
+#   zip_name: the name of the zip file for the package
+#   folder_name: the name of the folder containing the package
+#
+# Returns:
+#   The function sets the following global variables:
+#     VDM_PATH_ZIP: the path of the repository for the package
+#     VDM_VERSION: the version number for the package
+#     VDM_REPO_NAME: the repository name for the package
+#     VDM_PATH_REPO: the repository path for the package
+getPackageDetails() {
+  # Declare local variables.
   local zip_name="${1}"
   local folder_name="${2}"
   local path_repo
   local version
   local name
   local len=100
-  # get all xml
+  local file
+  local v
+  local n
+  local e
+  local p
+  local env_file
+  local env_name
+
+  # Create a list of all XML files in the current directory.
   find . -type f -name '*.xml'  > tmp
-  # now loop the files
-  while IFS= read -r file
-  do
-    # only use xml that are not called: config.xml or access.xml or default.xml
+
+  # Loop through the list of XML files.
+  while IFS= read -r file; do
+    # Skip XML files named config.xml, access.xml, or default.xml.
     if [[ "$file" == *"config.xml" ]] || [[ "$file" == *"access.xml" ]] || [[ "$file" == *"default.xml" ]]; then
       continue
     fi
-    # get the version
+
+    # Retrieve the version number from the XML file.
     v=$(grep -o -P '(?<=\<version>).*?(?=\</version>)' "$file")
-    # get the name
+
+    # Retrieve the name from the XML file.
     n=$(grep -o -P '(?<=\<name>).*?(?=\</name>)' "$file")
-    # check for an update server file (we must not use it)
+
+    # Check if the file is an update server file (which should not be used).
     e=$(grep -o -P '\<extension' "$file")
-    # when we have a version we have a xml that could match
+
+    # If a version number and name have been retrieved, and the file is not an update server file, continue processing.
     if [ -n "$v" ] && [ -n "$n" ] && [ -n "$e" ]; then
-      # count the folder depth
+      # Count the folder depth.
       # shellcheck disable=SC2001
       p=$(echo "$file" | sed 's|[^/]||g')
-      # keep the value of the shortest path
+
+      # Keep the value of the shortest path.
       if [[ "${#p}" -lt $len ]]; then
-        # set the directory name
+        # Set the directory name.
         path_repo="$(dirname "${file}")"
-        # update the length
+
+        # Update the length.
         len="${#p}"
-        # set the version
+
+        # Set the version.
         version="$v"
-        # set the name
+
+        # Set the name.
         name="$n"
       fi
     fi
-    # clear on each loop
+
+    # Clear variables for each loop.
     unset v
     unset n
     unset e
   done < tmp
-  # remove the tmp file
+
+  # Remove the tmp file.
   rm tmp
-  # set the repo path of the extension
+
+  # Set the path of the repository for the package.
   VDM_PATH_ZIP="${VDM_ZIP_DIR}/${folder_name}${path_repo#.}"
-  # return the version if found
+
+  # If a version number was not found, get it from the file name.
   if [ -z "$version" ]; then
      VDM_VERSION=$(getVersionNumberByFile "$zip_name")
   else
+    # Set the version number.
     VDM_VERSION="$version"
   fi
-  # return the name if found
+
+  # If the `VDM_USE_XML_NAME` variable is set, use the name from the XML file.
   if $VDM_USE_XML_NAME && [ -n "$name" ]; then
     name=$(getRepoName "${name}")
   else
+    # Otherwise, use the name from the file name.
     name=$(getRepoName "${zip_name}")
   fi
-  # possible in package mapper
+
+  # Check if an environment file exists for the package.
   env_file="${VDM_ZIP_DIR}/${folder_name}/.${PROGRAM_CODE}"
-  # check if we have a file
   if [ -f "${env_file}" ]; then
-    # get the repository name
+    # If the environment file exists, get the repository name from the file.
     env_name=$( grep "repo_name=" "${env_file}" | cut -d'=' -f2)
   fi
-  # check if we have a mapped repo name
+
+  # Use the mapped repository name, if available.
   VDM_REPO_NAME=$(getMapped "${env_name:-$name}")
-  # always clear the evn_name
+
+  # Clear the `env_name` variable.
   unset env_name
-  # set the repo path of the extension
+
+  # Set the repository path for the package.
   VDM_PATH_REPO="${VDM_ZIP_DIR}/${VDM_REPO_NAME}"
 }
 
-# get mapped name
+# getMapped - Gets the mapped repository name for a package
+#
+# getMapped takes the name of a package and returns its mapped repository name. If a mapping file exists (specified by
+# the VDM_MAPPER_FILE_PATH variable), the function will look for a value in the file corresponding to the package name.
+# If a value is found, it will be returned as the mapped repository name. If no mapping is found, the original package
+# name will be returned.
+#
+# Global Variables:
+#   VDM_MAPPER_FILE_PATH: the path to the mapping file
+#
+# Arguments:
+#   prop_key: the name of the package
+#
+# Returns:
+#   The mapped repository name, or the original name if no mapping is found.
 function getMapped() {
+  # Set the `prop_key` variable to the value of the first argument.
   local prop_key="${1}"
   local prop_value
+
+  # If the mapper file exists,
   if [ -f "${VDM_MAPPER_FILE_PATH}" ]; then
-    # get the value if set
+    # get the value for the specified key.
     prop_value=$( grep "$prop_key" "${VDM_MAPPER_FILE_PATH}" | cut -d'=' -f2)
   fi
+
+  # Return the mapped value, or the original value if no mapping is found.
   echo "${prop_value:-$prop_key}"
 }
 
-# return a random name
+# getRandomName - returns a random string
+#
+# getRandomName returns a random string generated by a simple basic random function.
+# The string consists of characters from the set 'A-HJ-NP-Za-km-z'.
+# The length of the returned string can be specified as an argument, with a default length of 128.
+#
+# Arguments:
+#   1: (optional) the desired length of the returned string
+#
+# Returns:
+#   a random string with the specified length
 function getRandomName() {
   # simple basic random
   # shellcheck disable=SC2046
@@ -322,40 +561,76 @@ function getRandomName() {
   echo $(tr -dc 'A-HJ-NP-Za-km-z' </dev/urandom | dd bs="${1:-128}" count=1 status=none)
 }
 
-# get repository name
-getRepoName() {
+# getRepoName - Get the repository name for a package.
+#
+# getRepoName processes the name of a package to determine the repository name that should be used.
+# The process involves removing the Joomla version and file extension, removing version information,
+# converting to lowercase, replacing spaces and dashes with the specified spacer, and removing
+# any non-safe URL characters. The final result is either the original name, or the mapped repository
+# name if a mapping is found in the mapper file.
+#
+# Arguments:
+#   ${1}: The name of the package.
+#
+# Returns:
+#   The processed repository name for the package.
+function getRepoName() {
+  # Set the `name` variable to the value of the first argument.
   local name="${1}"
-  # be sure to first remove the Joomla
-  # version from the file name if set
+
+  # Remove the Joomla version from the file name if set.
   name="${name//__J3/}"
   name="${name//__J4/}"
-  # make all lower
+
+  # Convert the name to lowercase.
   name="${name,,}"
-  # trim away the .zip
+
+  # Trim the '.zip' extension from the name.
   name="${name%%.zip}"
-  # get version variation
+
+  # Get version variation.
   tmp_v_underscore="${VDM_VERSION//./_}"
   tmp_v_dash="${VDM_VERSION//./\-}"
-  # remove the version
+
+  # Remove the version from the name.
   name="${name//v$VDM_VERSION/ }"
   name="${name//v$tmp_v_underscore/ }"
   name="${name//v$tmp_v_dash/ }"
-  # remove all none safe URL characters
+
+  # Remove all non-safe URL characters from the name.
   name="${name//[^a-z0-9_\- ]/ }"
-  # convert all _ to space
+
+  # Convert all underscores to spaces.
   name="${name//_/ }"
-  # convert a - to space
+
+  # Convert all dashes to spaces.
   name="${name//\-/ }"
-  # remove all double spaces
+
+  # Remove all double spaces.
   name=$(echo "${name}" | tr -s "[:blank:]" | xargs)
-  # convert all space to -
+
+  # Convert all spaces to the specified spacer.
   name="${name//[[:space:]]/$VDM_SPACER}"
-  # done (we have our name)
+
+  # Return the processed name.
   echo "${name}"
 }
 
-# get current version
-getVersionNumberByFile() {
+
+# getVersionNumberByFile - Extracts the version number from the file name
+#
+# getVersionNumberByFile takes the name of a zip file as an argument and returns the version number
+# contained within the file name. The version number is extracted by first removing the '.zip' extension,
+# then removing any text before and after the version number, and finally converting any '-' or '_' characters
+# within the version number to '.'. If the version number cannot be extracted from the file name, the default
+# version number '1.0.0' is returned.
+#
+# Arguments:
+#   1: the file name from which to extract the version number
+#
+# Returns:
+#   The extracted version number, or "1.0.0" if a version number cannot be found
+function getVersionNumberByFile() {
   local version="${1}"
   version=$(leftStrip "$version" "*-v")
   version=$(leftStrip "$version" "*_v")
@@ -377,56 +652,141 @@ getVersionNumberByFile() {
 #####################################################################################################################VDM
 ######################################## General Methods
 
-# Strip pattern from end of string
+# rightStrip - Trims a specified pattern from the end of a string
+#
+# The `rightStrip` function takes two arguments: a string and a pattern. It trims the specified pattern from the end of the string
+# and returns the modified string.
+#
+# Arguments:
+#   $1: A string to be modified.
+#   $2: A pattern to be trimmed from the end of the string.
+#
+# Returns:
+#   The modified string.
+
 function rightStrip() {
-  # Usage: rightStrip "string" "pattern"
+  # Trim the specified pattern from the end of the string.
   printf '%s\n' "${1%%$2}"
 }
 
-# Strip pattern from start of string
+# leftStrip - Removes the specified pattern from the start of a string
+#
+# leftStrip takes a string as the first argument and a pattern as the second argument. It removes the specified pattern from the start of the string and returns the modified string.
+#
+# Usage:
+#   leftStrip "string" "pattern"
+#
+# Arguments:
+#   string: the input string to be modified
+#   pattern: the pattern to be removed from the start of the string
+#
+# Returns:
+#   The modified string with the pattern removed from the start
 function leftStrip() {
-  # Usage: leftStrip "string" "pattern"
   printf '%s\n' "${1##$2}"
 }
 
-# to unzip
+# This function unzips the package located in the `VDM_ZIP_DIR` directory to the specified folder.
+#
+# Arguments:
+#   $1: the name of the zip file
+#   $2: the name of the folder to which the contents of the zip file will be extracted
+#
+# Returns:
+#   0 if the unzip operation was successful, 1 if the unzip operation was unsuccessful
 function _unzip() {
-  # set some locals
+  # Set some locals
   local zip_name="${1}"
   local folder_name="${2}"
-  # we unzip the data to this new folder
+
+  # Unzip the contents of the `zip_name` file to the specified `folder_name`.
+  # Redirect stdout and stderr to /dev/null to suppress output.
   if unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name" >/dev/null 2>&1; then
     _echo "[info] Successfully unzipped the package ($zip_name)"
     return 0
   fi
+
+  # Return 1 if the unzip operation was unsuccessful.
   return 1
 }
 
-# only if not set to be quiet
+# _echo - outputs a message to the console if the QUIET variable is not set
+#
+# _echo outputs the message in its first argument to the console if the QUIET variable is not set. If QUIET is set, the
+# message will not be output.
+#
+# Arguments:
+#   1. A string message to be output to the console
+#
+# Returns:
+#   None
+
 function _echo() {
   if ! $QUIET; then
     echo "$1"
   fi
 }
 
-# show an error
-showError() {
-  _echo "[error] We encountered and error on $1:$2"
+# showError - Show error message and exit with specified code
+#
+# showError displays an error message indicating the line number and file where the error occurred. It then exits the
+# script with the specified exit code.
+#
+# Arguments:
+#   $1: the name of the file where the error occurred
+#   $2: the exit code to use when exiting the script
+#
+# Returns:
+#   None, the function will exit the script with the specified exit code
+function showError() {
+  _echo "[error] We encountered an error on $1:$2"
   exit "$2"
 }
 
-# remove the program if installed
+# Function to uninstall the program
+#
+# This function checks if the script "/usr/local/bin/${PROGRAM_CODE}" exists,
+# and if it does, it will remove the file and print a message indicating that
+# the program "${PROGRAM_NAME} v${PROGRAM_VERSION}" has been uninstalled.
+# If the file does not exist, it will print a message indicating that the program
+# is not installed.
+#
+# Input:
+#   - None
+#
+# Output:
+#   - None
+
 function runUninstall() {
-  # now remove the script
+  # Check if the script "/usr/local/bin/${PROGRAM_CODE}" exists.
   if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
+    # Remove the script "/usr/local/bin/${PROGRAM_CODE}".
     sudo rm -f "/usr/local/bin/${PROGRAM_CODE}"
+    # Print a message indicating that the program has been uninstalled.
     _echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} has been completely uninstalled."
   else
+    # Print a message indicating that the program is not installed.
     echo "[info] ${PROGRAM_NAME} v${PROGRAM_VERSION} is not installed."
   fi
 }
 
-# update the script with the latest version
+# Function to update the script with the latest version
+#
+# This function updates the current script to the latest version.
+#
+# First, it will backup the current version of the script by moving
+# it to a file with a ".bak" extension.
+#
+# Then, it will use curl to download the latest version of the script
+# from the specified repository. The latest version is always stored
+# in the "master" branch, unless a different branch is specified.
+#
+# If the update is successful, the backup file will be deleted.
+# If the update fails, the backup file will be moved back to its
+# original location.
+#
+# Finally, the permissions for the script will be set to make it
+# executable, and the script will exit.
 function runUpdate() {
   # remove the current version
   if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
