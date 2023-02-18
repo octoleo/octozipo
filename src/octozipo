@@ -420,12 +420,12 @@ setGitCommit() {
 setPushChanges() {
   # If the DRY variable is set to true, print a message indicating that this is a dry run and no changes will be made.
   if $DRY; then
-     _echo "[dry run] git push"
+     _echo "[dry run] git push origin ${VDM_REPO_BRANCH}"
      _echo "[dry run] git push --tags"
   else
     # If the DRY variable is not set, try to push the changes and tags to the remote repository.
     # Redirect stdout and stderr to /dev/null to suppress output.
-    git push >/dev/null 2>&1 || return 1
+    git push origin "${VDM_REPO_BRANCH}" >/dev/null 2>&1 || return 1
     git push --tags >/dev/null 2>&1 || return 1
   fi
 
