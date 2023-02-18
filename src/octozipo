@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.1"
+PROGRAM_VERSION="2.2.2"
 PROGRAM_V="2.2"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -18,6 +18,14 @@ command -v unzip >/dev/null 2>&1 || {
 }
 command -v curl >/dev/null 2>&1 || {
   echo >&2 "[error] We require curl for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
+  exit 1
+}
+command -v awk >/dev/null 2>&1 || {
+  echo >&2 "[error] We require awk for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
+  exit 1
+}
+command -v sed >/dev/null 2>&1 || {
+  echo >&2 "[error] We require sed for $PROGRAM_NAME v${PROGRAM_V} to work, but it's not installed.  Aborting."
   exit 1
 }
 
@@ -75,10 +83,12 @@ main() {
         # get the package details
         getPackageDetails "${zip_name}" "${folder_name}"
         # check if the repo exist on our system
-        if git ls-remote "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" -q >/dev/null 2>&1; then
+        if git ls-remote --exit-code --heads "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}" -q >/dev/null 2>&1; then
           # check if repo is locally found
           cd "${VDM_PATH_REPO}" >/dev/null 2>&1 || {
-            git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_PATH_REPO}" -q >/dev/null 2>&1
+            git clone --depth 1 "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
+              --branch "${VDM_REPO_BRANCH}" --single-branch \
+              "${VDM_PATH_REPO}" -q >/dev/null 2>&1
             _echo "[info] Cloned git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
           }
           # set the new files in place
@@ -151,11 +161,11 @@ setNewRepository() {
   if $VDM_PUSH_CREATE; then
     # if dry we dont touch remote repo
     if $DRY; then
-      _echo "[dry run] git push -u origin master"
+      _echo "[dry run] git push -u origin ${VDM_REPO_BRANCH}"
       _echo "[dry run] git push --tags"
     else
       # we push to create this repo
-      git push -u origin master >/dev/null 2>&1
+      git push -u origin "${VDM_REPO_BRANCH}" >/dev/null 2>&1
       # check if we have tags to push
       git push --tags >/dev/null 2>&1
     fi
@@ -197,12 +207,8 @@ setExistingRepository() {
     # set repository user details
     setUserDetails
 
-    # If there are changes, create a commit message.
-    if [ "$(git tag -l "v$VDM_VERSION")" ]; then
-      setGitCommit "$VDM_VERSION" "update" || return 4
-    else
-      setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
-    fi
+    # make a commit
+    setGitCommit "$VDM_VERSION" "${VDM_GIT_COMMIT_MESSAGE}" || return 4
 
     # Pushes the changes and returns an error code of 1 if unsuccessful.
     setPushChanges || return 1
@@ -278,20 +284,17 @@ setGitInit() {
       # set repository user details
       setUserDetails
 
-      # If there are changes, check if a Git tag with the version number exists.
-      if [ -z "$VDM_VERSION" ] || git tag -l "v$VDM_VERSION" > /dev/null 2>&1; then
-        # If it does not exist or if there is no version number, create a commit with the "update" message.
-        # Return an error code of 4 if unsuccessful.
-        setGitCommit "$VDM_VERSION" "update" || return 4
-      else
-        # If the tag does exist, create a commit with the "update - v$VDM_VERSION" message.
-        # Return an error code of 4 if unsuccessful.
-        setGitCommit "$VDM_VERSION" "update - v$VDM_VERSION" || return 4
-      fi
+      # make a commit
+      setGitCommit "$VDM_VERSION" "${VDM_GIT_COMMIT_MESSAGE}" || return 4
     fi
   else
     # If the current directory is not a Git repository, initialize it.
     git init >/dev/null 2>&1 || return 4
+
+    # we need to make sure the branch is the right name
+    if [ "master" != "$VDM_REPO_BRANCH" ]; then
+          git branch -m "$VDM_REPO_BRANCH"
+    fi
 
     # set repository user details
     setUserDetails
@@ -551,14 +554,45 @@ getPackageDetails() {
   env_file="${VDM_ZIP_DIR}/${folder_name}/.${PROGRAM_CODE}"
   # If the environment file exists, get the repository name from the file.
   if [ -f "${env_file}" ]; then
-    env_name=$( grep "repo_name=" "${env_file}" | cut -d'=' -f2)
+    env_name=$(grep "^repo_name=" "${env_file}" | cut -d'=' -f2 | head -n 1)
+    env_branch=$(grep "^repo_branch=" "${env_file}" | cut -d'=' -f2 | head -n 1)
   fi
 
   # Use the mapped repository name, if available.
-  VDM_REPO_NAME=$(getMapped "${env_name:-$name}")
+  env_repo_name="${env_name:-$name}"
+  VDM_REPO_NAME=$(getMapped "${env_repo_name}")
+  # Use the mapped repository branch, if available.
+  env_branch_name="${name}_branch"
+  VDM_REPO_BRANCH=$(getMapped "${env_branch:-$env_branch_name}")
+  if [ "$env_branch_name" = "$VDM_REPO_BRANCH" ]; then
+      # Strings are equal, so change VDM_REPO_BRANCH to 'master'
+      VDM_REPO_BRANCH="master"
+  fi
 
-  # Clear the `env_name` variable.
+  # Check if an changelog file
+  env_changelog="${VDM_ZIP_DIR}/${folder_name}/CHANGELOG.md"
+  VDM_GIT_COMMIT_MESSAGE=$(getGitCommitComment "${env_changelog}" "v${VDM_VERSION}")
+
+  _echo "[info] name: $name"
+  _echo "[info] Repo key name: $env_repo_name"
+  _echo "[info] Repo name: $VDM_REPO_NAME"
+  _echo "[info] Branch key name: ${env_branch:-$env_branch_name}"
+  _echo "[info] Branch name: $VDM_REPO_BRANCH"
+  _echo "[info] version: v${VDM_VERSION}"
+  _echo "[info] Possible commit message:"
+  _echo "[message]"
+  _echo "${VDM_GIT_COMMIT_MESSAGE}"
+  _echo "[/message]"
+
+  # Clear the `env_xxx` variable.
   unset env_name
+  unset env_branch
+  unset env_repo_name
+  unset env_branch_name
+  unset env_heading_line
+  unset env_heading
+  unset env_data_lines
+  unset env_data_array
 
   # Set the repository path for the package.
   VDM_PATH_REPO="${VDM_ZIP_DIR}/${VDM_REPO_NAME}"
@@ -582,16 +616,65 @@ getPackageDetails() {
 function getMapped() {
   # Set the `prop_key` variable to the value of the first argument.
   local prop_key="${1}"
-  local prop_value
+  local prop_value=""
 
-  # If the mapper file exists,
+  # If the config file exists,
   if [ -f "${VDM_MAPPER_FILE_PATH}" ]; then
     # get the value for the specified key.
-    prop_value=$( grep "$prop_key" "${VDM_MAPPER_FILE_PATH}" | cut -d'=' -f2)
+    prop_value=$(grep "^${prop_key}=" "${VDM_MAPPER_FILE_PATH}" | cut -d'=' -f2 | head -n 1)
   fi
 
   # Return the mapped value, or the original value if no mapping is found.
   echo "${prop_value:-$prop_key}"
+}
+
+# getGitCommitComment - returns a possible comment
+#
+# getGitCommitComment returns a possible comment that can be used in the commit message
+#
+# Arguments:
+#   1: the path to the changelog file
+#   2: the current version
+#
+# Returns:
+#   comment string
+function getGitCommitComment() {
+  local file_path="$1"
+  local current_version="$2"
+  local message
+  local version_line
+  local version
+  local message_lines
+  local cleaned_lines
+  local formatted_lines
+
+  # default message
+  message="Release of ${current_version}"
+
+  # if version tag could not be found
+  if [ -z "$current_version" ]; then
+    message="Update"
+  # If tag already exist
+  elif git tag -l "$current_version" > /dev/null 2>&1; then
+    message="Update on $current_version (beta for next version)\n\nHere's an update on the current version, which includes changes towards the next release still in beta."
+  # if file path exist and the tag was never set before
+  elif [ -f "${file_path}" ]; then
+    # Use grep to find the line number of the last heading/version
+    version_line=$(grep -n "^#" "$file_path" | tail -n 1 | cut -d: -f1)
+    # Extract the last heading/version and assign it to a variable (should be the version number format:[# v1.0.0])
+    version=$(sed -n "${version_line}p" "$file_path" | sed -e 's/^#\+ *//' -e 's/^[[:space:]]*//' -e 's/^-* \?//' -e 's/[[:space:]]*$//')
+    # Use sed to extract the last message lines
+    message_lines=$(sed -n "${version_line},\$p" "$file_path" | grep -v "^#" | tail -n +2)
+    cleaned_lines=$(echo "$message_lines" | sed -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*//' -e 's/^-* \?//' -e 's/[[:space:]]*$//' -e 's/\.*$//' )
+    formatted_lines=$(echo "$cleaned_lines" | awk '{printf "%s%s",(NR>1?". ":""),$0} END{printf ".\n"}')
+
+    # check if this is the same version as the current version
+    if [ "$current_version" = "$version" ]; then
+      message="Stable release of ${current_version}\n\n${formatted_lines}"
+    fi
+  fi
+
+  echo -e "${message}"
 }
 
 # getRandomName - returns a random string
@@ -876,6 +959,7 @@ function runUpdate() {
 : "${VDM_ZIP_DIR:=$PWD}"
 VDM_ORG="joomla"
 VDM_GIT_URL="git.vdm.dev"
+VDM_GIT_COMMIT_MESSAGE=''
 VDM_PUSH_CREATE=false
 VDM_USE_XML_NAME=false
 VDM_KEEP_ZIP=false
@@ -1190,6 +1274,7 @@ VDM_PATH_REPO=''
 VDM_PATH_ZIP=''
 VDM_VERSION=''
 VDM_REPO_NAME=''
+VDM_REPO_BRANCH=''
 
 # debug config values
 if $DEBUG; then
