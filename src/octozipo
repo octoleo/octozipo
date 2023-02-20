@@ -64,8 +64,9 @@ main() {
     # go to folder where zip files are placed
     cd "$VDM_ZIP_DIR" || exit 3
     # check that the folder has zip files
-    # shellcheck disable=SC2012
-    [ "$(ls -1 ./*.zip 2>/dev/null | wc -l)" == 0 ] && showError "looking for zip files, since no zip files in the folder $VDM_ZIP_DIR ERROR-NR" 6
+    if [ "$(find . -maxdepth 1 -type f -name "*.zip" | wc -l)" -eq 0 ]; then
+      showError "looking for zip files, since no zip files in the folder $VDM_ZIP_DIR ERROR-NR" 6
+    fi
     # get all zip files
     for zip_name in *.zip; do
       # get a random folder name
@@ -86,7 +87,7 @@ main() {
         if git ls-remote --exit-code --heads "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}" -q >/dev/null 2>&1; then
           # check if repo is locally found
           cd "${VDM_PATH_REPO}" >/dev/null 2>&1 || {
-            git clone --depth 1 "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
+            git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
               --branch "${VDM_REPO_BRANCH}" --single-branch \
               "${VDM_PATH_REPO}" -q >/dev/null 2>&1
             _echo "[info] Cloned git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
@@ -207,6 +208,13 @@ setExistingRepository() {
     # set repository user details
     setUserDetails
 
+    # get commit message
+    VDM_GIT_COMMIT_MESSAGE=$(getGitCommitComment "${VDM_PATH_REPO}/CHANGELOG.md" "v${VDM_VERSION}")
+    _echo "[info] Possible commit message:"
+    _echo "[message]"
+    _echo "${VDM_GIT_COMMIT_MESSAGE}"
+    _echo "[/message]"
+
     # make a commit
     setGitCommit "$VDM_VERSION" "${VDM_GIT_COMMIT_MESSAGE}" || return 4
 
@@ -247,6 +255,7 @@ setNewFiles() {
 
     # Notifies the user that the files have been moved to the repository folder.
     _echo "[info] Files moved to (${VDM_PATH_REPO})"
+
   else
     # Returns an error code of 1 if unable to change to the repository folder.
     return 1
@@ -283,6 +292,13 @@ setGitInit() {
     else
       # set repository user details
       setUserDetails
+
+      # get commit message
+      VDM_GIT_COMMIT_MESSAGE=$(getGitCommitComment "${VDM_PATH_REPO}/CHANGELOG.md" "v${VDM_VERSION}")
+      _echo "[info] Possible commit message:"
+      _echo "[message]"
+      _echo "${VDM_GIT_COMMIT_MESSAGE}"
+      _echo "[/message]"
 
       # make a commit
       setGitCommit "$VDM_VERSION" "${VDM_GIT_COMMIT_MESSAGE}" || return 4
@@ -569,20 +585,12 @@ getPackageDetails() {
       VDM_REPO_BRANCH="master"
   fi
 
-  # Check if an changelog file
-  env_changelog="${VDM_ZIP_DIR}/${folder_name}/CHANGELOG.md"
-  VDM_GIT_COMMIT_MESSAGE=$(getGitCommitComment "${env_changelog}" "v${VDM_VERSION}")
-
   _echo "[info] name: $name"
   _echo "[info] Repo key name: $env_repo_name"
   _echo "[info] Repo name: $VDM_REPO_NAME"
   _echo "[info] Branch key name: ${env_branch:-$env_branch_name}"
   _echo "[info] Branch name: $VDM_REPO_BRANCH"
   _echo "[info] version: v${VDM_VERSION}"
-  _echo "[info] Possible commit message:"
-  _echo "[message]"
-  _echo "${VDM_GIT_COMMIT_MESSAGE}"
-  _echo "[/message]"
 
   # Clear the `env_xxx` variable.
   unset env_name
@@ -690,9 +698,7 @@ function getGitCommitComment() {
 #   a random string with the specified length
 function getRandomName() {
   # simple basic random
-  # shellcheck disable=SC2046
-  # shellcheck disable=SC2005
-  echo $(tr -dc 'A-HJ-NP-Za-km-z' </dev/urandom | dd bs="${1:-128}" count=1 status=none)
+  head -c "${1:-16}" < <(tr -dc 'A-HJ-NP-Za-km-z' </dev/urandom)
 }
 
 # getRepoName - Get the repository name for a package.
@@ -741,7 +747,7 @@ function getRepoName() {
   name="${name//\-/ }"
 
   # Remove all double spaces.
-  name=$(echo "${name}" | tr -s "[:blank:]" | xargs)
+  name=$(echo "${name}" | tr -s "[:blank:]" | xargs < <(cat))
 
   # Convert all spaces to the specified spacer.
   name="${name//[[:space:]]/$VDM_SPACER}"
@@ -835,8 +841,8 @@ function _unzip() {
   local folder_name="${2}"
 
   # Unzip the contents of the `zip_name` file to the specified `folder_name`.
-  # Redirect stdout and stderr to /dev/null to suppress output.
-  if unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name" >/dev/null 2>&1; then
+  # Use process substitution to pass the output of `unzip` to `cat`.
+  if cat < <(unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name") >/dev/null 2>&1; then
     _echo "[info] Successfully unzipped the package ($zip_name)"
     return 0
   fi
