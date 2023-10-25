@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.2"
+PROGRAM_VERSION="2.2.3"
 PROGRAM_V="2.2"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -552,7 +552,7 @@ getPackageDetails() {
 
   # If a version number was not found, get it from the file name.
   if [ -z "$version" ]; then
-     VDM_VERSION=$(getVersionNumberByFile "$zip_name")
+    VDM_VERSION=$(getVersionNumberByFile "$zip_name")
   else
     # Set the version number.
     VDM_VERSION="$version"
@@ -663,16 +663,16 @@ function getGitCommitComment() {
   if [ -z "$current_version" ]; then
     message="Update"
   # If tag already exist
-  elif git tag -l "$current_version" > /dev/null 2>&1; then
+  elif git tag -l "$current_version" | grep -q "^$current_version$"; then
     message="Update on $current_version (beta for next version)\n\nHere's an update on the current version, which includes changes towards the next release still in beta."
   # if file path exist and the tag was never set before
   elif [ -f "${file_path}" ]; then
-    # Use grep to find the line number of the last heading/version
-    version_line=$(grep -n "^#" "$file_path" | tail -n 1 | cut -d: -f1)
-    # Extract the last heading/version and assign it to a variable (should be the version number format:[# v1.0.0])
+    # Use grep to find the line number of the first heading/version
+    version_line=$(grep -n "^#" "$file_path" | head -n 1 | cut -d: -f1)
+    # Extract the first heading/version and assign it to a variable
     version=$(sed -n "${version_line}p" "$file_path" | sed -e 's/^#\+ *//' -e 's/^[[:space:]]*//' -e 's/^-* \?//' -e 's/[[:space:]]*$//')
-    # Use sed to extract the last message lines
-    message_lines=$(sed -n "${version_line},\$p" "$file_path" | grep -v "^#" | tail -n +2)
+    # Use sed to extract the message lines after the first header, but stop at the next header or an empty line
+    message_lines=$(sed -n "$((version_line + 1)),$ p" "$file_path" | awk '/^#/{exit} /^[[:space:]]*$/{exit} {print}')
     cleaned_lines=$(echo "$message_lines" | sed -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*//' -e 's/^-* \?//' -e 's/[[:space:]]*$//' -e 's/\.*$//' )
     formatted_lines=$(echo "$cleaned_lines" | awk '{printf "%s%s",(NR>1?". ":""),$0} END{printf ".\n"}')
 
@@ -897,7 +897,6 @@ function showError() {
 #
 # Output:
 #   - None
-
 function runUninstall() {
   # Check if the script "/usr/local/bin/${PROGRAM_CODE}" exists.
   if [ -f "/usr/local/bin/${PROGRAM_CODE}" ]; then
