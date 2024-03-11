@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.4"
+PROGRAM_VERSION="2.2.5"
 PROGRAM_V="2.2"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -664,7 +664,7 @@ function getGitCommitComment() {
     message="Update"
   # If tag already exist
   elif git rev-parse --is-inside-work-tree > /dev/null 2>&1 && git tag -l "$current_version" | grep -q "^$current_version$"; then
-    message="Update on $current_version (beta for next version)\n\nHere's an update on the current version, which includes changes towards the next release still in beta."
+    message="Update on $current_version (changes towards the next release)\n\nHere's an update on the current version, which includes changes towards the next release still in development."
   # if file path exist and the tag was never set before
   elif [ -f "${file_path}" ]; then
     # Use grep to find the line number of the first heading/version
