@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.5"
+PROGRAM_VERSION="2.2.6"
 PROGRAM_V="2.2"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -678,7 +678,7 @@ function getGitCommitComment() {
 
     # check if this is the same version as the current version
     if [ "$current_version" = "$version" ]; then
-      message="Stable release of ${current_version}\n\n${formatted_lines}"
+      message="Release of ${current_version}\n\n${formatted_lines}"
     fi
   fi
 
@@ -934,7 +934,7 @@ function runUpdate() {
     sudo mv "/usr/local/bin/${PROGRAM_CODE}" "/usr/local/bin/${PROGRAM_CODE}.bak"
   fi
   # pull the latest version. Master is always the latest
-  if sudo curl --fail -L "https://git.vdm.dev/api/v1/repos/octoleo/${PROGRAM_CODE}/raw/src/${PROGRAM_CODE}?ref=${branch:-master}&access_token=${VDM_ACCESS_TOKEN}" -o "/usr/local/bin/${PROGRAM_CODE}" 2>/dev/null; then
+  if sudo curl --fail -H "Authorization: token ${VDM_ACCESS_TOKEN}" -L "https://git.vdm.dev/api/v1/repos/octoleo/${PROGRAM_CODE}/raw/src/${PROGRAM_CODE}?ref=${branch:-master}" -o "/usr/local/bin/${PROGRAM_CODE}" 2>/dev/null; then
     # give success message
     _echo "[success] Update was successful."
     # do we have a backup
