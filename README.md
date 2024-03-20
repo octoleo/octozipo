@@ -1,6 +1,12 @@
-# Octozipo
+<h2><img align="middle" src="https://raw.githubusercontent.com/odb/official-bash-logo/master/assets/Logos/Icons/PNG/64x64.png" >
+Octozipo - Convert Zip package to a repository.
+</h2>
+
+Written by Llewellyn van der Merwe (@llewellynvdm)
 
 Convert Zip packages to repositories and if they exist update and tag them.
+
+Linted by [#ShellCheck](https://github.com/koalaman/shellcheck)
 
 ## Install
 

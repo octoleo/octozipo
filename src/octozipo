@@ -806,7 +806,7 @@ function getVersionNumberByFile() {
 
 function rightStrip() {
   # Usage: rightStrip "string" "pattern"
-  printf '%s\n' "${1%%$2}"
+  printf '%s\n' "${1%%"$2"}"
 }
 
 # leftStrip - Removes the specified pattern from the start of a string
@@ -824,7 +824,7 @@ function rightStrip() {
 #   The modified string with the pattern removed from the start
 function leftStrip() {
   # Usage: leftStrip "string" "pattern"
-  printf '%s\n' "${1##$2}"
+  printf '%s\n' "${1##"$2"}"
 }
 
 # This function unzips the package located in the `VDM_ZIP_DIR` directory to the specified folder.
