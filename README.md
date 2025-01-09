@@ -10,13 +10,8 @@ Linted by [#ShellCheck](https://github.com/koalaman/shellcheck)
 
 ## Install
 
-## Get needed access token
-
-Get a token from [https://git.vdm.dev/user/settings/applications](https://git.vdm.dev/user/settings/applications)
-
 ```shell
-$ export SETUP_TOKEN="xxxxxxxxxxtokenxxxxxxxxxxxxxxxxxxxxxxxx"
-$ sudo curl -L "https://git.vdm.dev/api/v1/repos/octoleo/octozipo/raw/src/octozipo?access_token=${SETUP_TOKEN}" -o /usr/local/bin/octozipo
+$ sudo curl -L "https://git.vdm.dev/api/v1/repos/octoleo/octozipo/raw/src/octozipo" -o /usr/local/bin/octozipo
 $ sudo chmod +x /usr/local/bin/octozipo
 ```
 - Global **environment** file can be set at: `/home/$USER/.config/octozipo/.env`
