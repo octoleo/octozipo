@@ -3,7 +3,7 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.6"
+PROGRAM_VERSION="2.2.7"
 PROGRAM_V="2.2"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
@@ -84,7 +84,7 @@ main() {
         # get the package details
         getPackageDetails "${zip_name}" "${folder_name}"
         # check if the repo exist on our system
-        if git ls-remote --exit-code --heads "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}" -q >/dev/null 2>&1; then
+        if git ls-remote --exit-code --heads "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}" >/dev/null 2>&1; then
           # check if repo is locally found
           cd "${VDM_PATH_REPO}" >/dev/null 2>&1 || {
             git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
