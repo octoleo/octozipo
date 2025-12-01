@@ -11,7 +11,7 @@ Linted by [#ShellCheck](https://github.com/koalaman/shellcheck)
 ## Install
 
 ```shell
-$ sudo curl -L "https://git.vdm.dev/api/v1/repos/octoleo/octozipo/raw/src/octozipo" -o /usr/local/bin/octozipo
+$ sudo curl -L "https://raw.githubusercontent.com/octoleo/octozipo/refs/heads/master/src/octozipo" -o /usr/local/bin/octozipo
 $ sudo chmod +x /usr/local/bin/octozipo
 ```
 - Global **environment** file can be set at: `/home/$USER/.config/octozipo/.env`
