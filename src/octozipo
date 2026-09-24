@@ -3,8 +3,8 @@
 # Program name
 PROGRAM_NAME="Octozipo"
 PROGRAM_CODE="octozipo"
-PROGRAM_VERSION="2.2.8"
-PROGRAM_V="2.2"
+PROGRAM_VERSION="2.3.0"
+PROGRAM_V="2.3"
 # PROGRAM_URL="https://git.vdm.dev/octoleo/${PROGRAM_CODE}"
 
 # Do some prep work
@@ -51,6 +51,8 @@ command -v sed >/dev/null 2>&1 || {
 #   VDM_KEEP_ZIP: A flag to indicate whether to keep the zip file after processing
 #   VDM_KEEP_REPO: A flag to indicate whether to keep the repository folder after processing
 #   VDM_KEEP_THIS_ONE: A flag to indicate whether to keep the current processed file
+#   VDM_REPORT_FILE: The (optional) file to which the result of each package is appended
+#   VDM_REPO_STATUS: The result of the last processed package (created|updated|unchanged|pending|dry-run)
 #   DRY: A flag to indicate whether the script is in dry run mode
 #
 # Arguments:
@@ -73,7 +75,9 @@ main() {
       folder_name=$( getRandomName 7 )
       # unzip this zip file
       _unzip "${zip_name}" "${folder_name}" || {
-        _echo "[error] We encountered and error, we could not unzip ($VDM_ZIP_DIR/$zip_name) in to ($VDM_ZIP_DIR/$folder_name) ERROR-NR 6"
+        _error "[error] We encountered an error, we could not unzip ($VDM_ZIP_DIR/$zip_name) in to ($VDM_ZIP_DIR/$folder_name) ERROR-NR 6"
+        # record the skipped package
+        setReport "skipped" "${zip_name}" "" "" ""
         # so we skip this package
         continue
       }
@@ -81,29 +85,33 @@ main() {
       if [ -d "${VDM_ZIP_DIR}/${folder_name}" ]; then
         # we change into the unzipped folder
         cd "${VDM_ZIP_DIR}/${folder_name}" || exit 1
+        # every package sets its own result
+        VDM_REPO_STATUS=''
         # get the package details
         getPackageDetails "${zip_name}" "${folder_name}"
         # check if the repo exist on our system
-        if git ls-remote --exit-code --heads "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}" >/dev/null 2>&1; then
+        if isRemoteBranch "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" "${VDM_REPO_BRANCH}"; then
           # check if repo is locally found
           cd "${VDM_PATH_REPO}" >/dev/null 2>&1 || {
-            git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
+            _git clone "git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git" \
               --branch "${VDM_REPO_BRANCH}" --single-branch \
-              "${VDM_PATH_REPO}" -q >/dev/null 2>&1
+              "${VDM_PATH_REPO}" -q || showPackageError "Clone Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
             _echo "[info] Cloned git@${VDM_GIT_URL}:${VDM_ORG}/${VDM_REPO_NAME}.git"
           }
           # set the new files in place
-          setNewFiles || showError "Opening Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
+          setNewFiles || showPackageError "Opening Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
           # update the existing repo
-          setExistingRepository || showError "Update Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
+          setExistingRepository || showPackageError "Update Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
         else
           # create the new folder
           mkdir -p "${VDM_PATH_REPO}"
           # set the new files in place
-          setNewFiles || showError "Create Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
+          setNewFiles || showPackageError "Create Folder:(${VDM_PATH_REPO}) ERROR-NR" 7
           # setup the new repository
-          setNewRepository || showError "Setup Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
+          setNewRepository || showPackageError "Setup Repo:(${VDM_REPO_NAME}) ERROR-NR" 7
         fi
+        # record the result of this package
+        setReport "${VDM_REPO_STATUS}" "${zip_name}" "${VDM_REPO_NAME}" "${VDM_REPO_BRANCH}" "${VDM_VERSION}"
         # remove the random folder
         rm -fr "${VDM_ZIP_DIR:?}/${folder_name:?}"
         # remove the zip file
@@ -125,7 +133,7 @@ main() {
         fi
         _echo "================================"
       else
-        showError "opening of folder $VDM_ZIP_DIR/$VDM_FOLDER_NAME as it does not exist ERROR-NR" 5
+        showError "opening of folder $VDM_ZIP_DIR/$folder_name as it does not exist ERROR-NR" 5
       fi
     done
   else
@@ -164,19 +172,22 @@ setNewRepository() {
     if $DRY; then
       _echo "[dry run] git push -u origin ${VDM_REPO_BRANCH}"
       _echo "[dry run] git push --tags"
+      VDM_REPO_STATUS="dry-run"
     else
       # we push to create this repo
-      git push -u origin "${VDM_REPO_BRANCH}" >/dev/null 2>&1
+      _git push -u origin "${VDM_REPO_BRANCH}" || return 1
       # check if we have tags to push
-      git push --tags >/dev/null 2>&1
+      _git push --tags || return 1
+      VDM_REPO_STATUS="created"
+      # pushed create
+      _echo "[info] Push created ($VDM_REPO_NAME v$VDM_VERSION) repository"
     fi
-    # pushed create
-    _echo "[info] Push created ($VDM_REPO_NAME v$VDM_VERSION) repository"
   else
     # give action info
     _echo "[info] When ready link and push changes to remote"
     # keep this one REPO
     VDM_KEEP_THIS_ONE=true
+    VDM_REPO_STATUS="pending"
   fi
   return 0
 }
@@ -203,6 +214,7 @@ setExistingRepository() {
   # Checks if there are any changes in the repository.
   if [[ -z $(git status --porcelain) ]]; then # ALTERNATIVE: if git diff-index --quiet HEAD --; then
     _echo "[info] No changes found in ($VDM_REPO_NAME v$VDM_VERSION) repository"
+    VDM_REPO_STATUS="unchanged"
   else
 
     # set repository user details
@@ -220,6 +232,13 @@ setExistingRepository() {
 
     # Pushes the changes and returns an error code of 1 if unsuccessful.
     setPushChanges || return 1
+
+    # Record the result (nothing is pushed in a dry run).
+    if $DRY; then
+      VDM_REPO_STATUS="dry-run"
+    else
+      VDM_REPO_STATUS="updated"
+    fi
 
     # Notifies the user that the changes have been pushed to the repository.
     _echo "[info] Pushed update to ($VDM_REPO_NAME v$VDM_VERSION) repository"
@@ -305,7 +324,7 @@ setGitInit() {
     fi
   else
     # If the current directory is not a Git repository, initialize it.
-    git init >/dev/null 2>&1 || return 4
+    _git init || return 4
 
     # we need to make sure the branch is the right name
     if [ "master" != "$VDM_REPO_BRANCH" ]; then
@@ -384,7 +403,9 @@ function setUserDetails () {
 # setGitCommit - Makes a Git commit with a specified commit message and creates a Git tag
 #
 # setGitCommit adds all changes to the Git index, makes a Git commit with the specified commit message,
-# and, if a version number is provided, creates a new Git tag for the commit.
+# and, if a version number is provided, creates a new Git tag for the commit. When tag signing is enabled
+# in the git configuration (tag.gpgSign) a signed (annotated) tag is created with the commit message as
+# the tag message, since automated environments have no editor to ask for one.
 #
 # Arguments:
 #   1: the version number (optional)
@@ -395,10 +416,10 @@ function setUserDetails () {
 #   1: if the commit or tag creation was unsuccessful
 setGitCommit() {
   # Adds all changes to the Git index.
-  git add . >/dev/null 2>&1 || return 1
+  _git add . || return 1
 
   # Makes a Git commit with the specified commit message.
-  git commit -am"$2" >/dev/null 2>&1 || return 1
+  _git commit -a -m "$2" || return 1
 
   # If a version number is provided, create a new Git tag for the commit.
   if [ -n "$1" ]; then
@@ -409,7 +430,12 @@ setGitCommit() {
     else
       # If the tag does not exist, create it.
       # Return an error code of 1 if the tag creation was unsuccessful.
-      git tag "v$1" >/dev/null 2>&1 || return 1
+      if [ "$(git config --bool --get tag.gpgsign 2>/dev/null)" = "true" ]; then
+        # Signed tags are annotated tags, so they need a message (there is no editor in automated environments).
+        _git tag -s "v$1" -m "$2" || return 1
+      else
+        _git tag "v$1" || return 1
+      fi
       # Notify the user that the tag was added.
       _echo "[info] Added v$1 tag"
     fi
@@ -440,9 +466,9 @@ setPushChanges() {
      _echo "[dry run] git push --tags"
   else
     # If the DRY variable is not set, try to push the changes and tags to the remote repository.
-    # Redirect stdout and stderr to /dev/null to suppress output.
-    git push origin "${VDM_REPO_BRANCH}" >/dev/null 2>&1 || return 1
-    git push --tags >/dev/null 2>&1 || return 1
+    # The git output is only shown when a push fails.
+    _git push origin "${VDM_REPO_BRANCH}" || return 1
+    _git push --tags || return 1
   fi
 
   # Return 0 if the function has completed successfully.
@@ -604,6 +630,36 @@ getPackageDetails() {
 
   # Set the repository path for the package.
   VDM_PATH_REPO="${VDM_ZIP_DIR}/${VDM_REPO_NAME}"
+}
+
+# isRemoteBranch - Checks if a branch exists in a remote repository
+#
+# isRemoteBranch asks the remote repository for the given branch. When the remote can not be reached at all
+# (no access, wrong url, repository does not exist) the reason is shown, so that automated runs can be
+# diagnosed, and the branch is treated as not existing.
+#
+# Arguments:
+#   1: the remote repository url
+#   2: the branch name
+#
+# Returns:
+#   0 if the branch exists on the remote, 1 if not (or the remote is not available)
+function isRemoteBranch() {
+  local output
+  local code
+
+  # exit code 2 means the remote was reached, but the branch was not found
+  output=$(git ls-remote --exit-code --heads "${1}" "${2}" 2>&1)
+  code=$?
+
+  if [ "${code}" -eq 0 ]; then
+    return 0
+  elif [ "${code}" -ne 2 ]; then
+    _echo "[info] Remote repository (${1}) is not available (git exit ${code})"
+    [ -n "${output}" ] && _echo "[info] ${output}"
+  fi
+
+  return 1
 }
 
 # getMapped - Gets the mapped repository name for a package
@@ -827,7 +883,80 @@ function leftStrip() {
   printf '%s\n' "${1##"$2"}"
 }
 
+# getAbsPath - Returns the absolute path of a directory or file
+#
+# getAbsPath resolves the given path to an absolute path, since the script changes directories while
+# processing packages. A path that does not exist is returned unchanged.
+#
+# Arguments:
+#   $1: the path to resolve
+#
+# Returns:
+#   The absolute path (or the given path when it does not exist)
+function getAbsPath() {
+  local path="${1}"
+  if [ -d "${path}" ]; then
+    (cd "${path}" && pwd)
+  elif [ -f "${path}" ]; then
+    echo "$(cd "$(dirname "${path}")" && pwd)/$(basename "${path}")"
+  else
+    echo "${path}"
+  fi
+}
+
+# _git - Runs a git command quietly, showing its output only when it fails
+#
+# _git runs the given git command and captures its output. When the command fails the exit code and the
+# captured output are shown as an error, so that failures (authentication, missing repositories, signing
+# problems) can be diagnosed in automated environments.
+#
+# Arguments:
+#   $@: the git command and its arguments
+#
+# Returns:
+#   The exit code of the git command
+function _git() {
+  local output
+  local code
+
+  output=$(git "$@" 2>&1)
+  code=$?
+
+  if [ "${code}" -ne 0 ]; then
+    _error "[error] git ${1} failed (exit ${code})"
+    [ -n "${output}" ] && _error "${output}"
+  fi
+
+  return "${code}"
+}
+
+# setReport - Appends the result of a package to the report file
+#
+# setReport appends one tab separated line to the report file (when VDM_REPORT_FILE is set), so that other
+# tools (like a workflow) can act on the result of each package.
+#
+# Columns:
+#   status, zip file, git url, org, repository, branch, version
+#
+# Arguments:
+#   $1: the status (created|updated|unchanged|pending|dry-run|skipped|failed)
+#   $2: the zip file name
+#   $3: the repository name
+#   $4: the branch name
+#   $5: the version
+#
+# Returns:
+#   None
+function setReport() {
+  if [ -n "${VDM_REPORT_FILE}" ]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${1}" "${2}" "${VDM_GIT_URL}" "${VDM_ORG}" "${3}" "${4}" "${5}" >> "${VDM_REPORT_FILE}"
+  fi
+}
+
 # This function unzips the package located in the `VDM_ZIP_DIR` directory to the specified folder.
+#
+# The output of unzip is only shown when the package could not be unzipped. An exit code of 1 from unzip
+# means it finished with warnings, which is still treated as a success.
 #
 # Arguments:
 #   $1: the name of the zip file
@@ -839,13 +968,22 @@ function _unzip() {
   # Set some locals.
   local zip_name="${1}"
   local folder_name="${2}"
+  local output
+  local code
 
   # Unzip the contents of the `zip_name` file to the specified `folder_name`.
-  # Use process substitution to pass the output of `unzip` to `cat`.
-  if cat < <(unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name") >/dev/null 2>&1; then
+  output=$(unzip "$VDM_ZIP_DIR/$zip_name" -d "$VDM_ZIP_DIR/$folder_name" 2>&1)
+  code=$?
+
+  if [ "${code}" -eq 0 ] || [ "${code}" -eq 1 ]; then
     _echo "[info] Successfully unzipped the package ($zip_name)"
     return 0
   fi
+
+  # Show why the package could not be unzipped, and remove what was extracted.
+  _error "[error] unzip failed (exit ${code}) for ($zip_name)"
+  [ -n "${output}" ] && _error "${output}"
+  rm -fr "${VDM_ZIP_DIR:?}/${folder_name:?}"
 
   # Return 1 if the unzip operation was unsuccessful.
   return 1
@@ -868,6 +1006,17 @@ function _echo() {
   fi
 }
 
+# _error - outputs an error message to stderr (also when the QUIET variable is set)
+#
+# Arguments:
+#   1. A string message to be output to stderr
+#
+# Returns:
+#   None
+function _error() {
+  echo >&2 "$1"
+}
+
 # showError - Show error message and exit with specified code
 #
 # showError displays an error message indicating the line number and file where the error occurred. It then exits the
@@ -880,8 +1029,24 @@ function _echo() {
 # Returns:
 #   None, the function will exit the script with the specified exit code
 function showError() {
-  _echo "[error] We encountered an error on $1:$2"
+  _error "[error] We encountered an error on $1:$2"
   exit "$2"
+}
+
+# showPackageError - Record the failure of the current package and exit with specified code
+#
+# showPackageError adds a failed line for the package being processed to the report file and then
+# shows the error message and exits the script with the specified exit code.
+#
+# Arguments:
+#   $1: the error message
+#   $2: the exit code to use when exiting the script
+#
+# Returns:
+#   None, the function will exit the script with the specified exit code
+function showPackageError() {
+  setReport "failed" "${zip_name}" "${VDM_REPO_NAME}" "${VDM_REPO_BRANCH}" "${VDM_VERSION}"
+  showError "$1" "$2"
 }
 
 # Function to uninstall the program
@@ -960,17 +1125,20 @@ function runUpdate() {
   exit 0
 }
 
-# set the defaults
+# set the defaults (the string settings can also be set with environment variables)
 : "${VDM_ZIP_DIR:=$PWD}"
-VDM_ORG="joomla"
-VDM_GIT_URL="git.vdm.dev"
+: "${VDM_ORG:=joomla}"
+: "${VDM_GIT_URL:=git.vdm.dev}"
+: "${VDM_SPACER:=-}"
+: "${VDM_GIT_DATE:=}"
+: "${VDM_REPORT_FILE:=}"
 VDM_GIT_COMMIT_MESSAGE=''
 VDM_PUSH_CREATE=false
 VDM_USE_XML_NAME=false
 VDM_KEEP_ZIP=false
 VDM_KEEP_REPO=false
 VDM_KEEP_THIS_ONE=false
-VDM_SPACER='-'
+VDM_REPO_STATUS=''
 DRY=false
 QUIET=false
 DEBUG=false
@@ -1029,6 +1197,11 @@ Usage: ${PROGRAM_CODE} [OPTION...]
 	default: Actual Date
 	example: ${PROGRAM_CODE} --git-date="Feb 14 03:18:31"
 	======================================================
+   --report=<file>
+	write a tab separated report line per package
+	(status, zip, git url, org, repo, branch, version)
+	example: ${PROGRAM_CODE} --report=/tmp/octozipo.tsv
+	======================================================
    --keep-repo
 	switch to keep the repository directory
 	example: ${PROGRAM_CODE} --keep-repo
@@ -1050,7 +1223,7 @@ Usage: ${PROGRAM_CODE} [OPTION...]
 	example: ${PROGRAM_CODE} --quiet
 	======================================================
    --debug
-	tp print out all config details
+	to print out all config details
 	example: ${PROGRAM_CODE} --debug
 	======================================================
    --update
@@ -1105,7 +1278,7 @@ while :; do
       VDM_ZIP_DIR=$2
       shift
     else
-      _echo '[error] "--zip-dir" requires a non-empty option argument.'
+      _error '[error] "--zip-dir" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1113,7 +1286,7 @@ while :; do
     VDM_ZIP_DIR=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -z= | --zip-dir=) # Handle the case of an empty --packages=
-    _echo '[error] "--zip-dir=" requires a non-empty option argument.'
+    _error '[error] "--zip-dir=" requires a non-empty option argument.'
     exit 17
     ;;
   -g | --git-url) # Takes an option argument; ensure it has been specified.
@@ -1121,7 +1294,7 @@ while :; do
       VDM_GIT_URL=$2
       shift
     else
-      _echo '[error] "--git-url" requires a non-empty option argument.'
+      _error '[error] "--git-url" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1129,7 +1302,7 @@ while :; do
     VDM_GIT_URL=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -g= | --git-url=) # Handle the case of an empty --packages=
-    _echo '[error] "--git-url=" requires a non-empty option argument.'
+    _error '[error] "--git-url=" requires a non-empty option argument.'
     exit 17
     ;;
   -o | --org) # Takes an option argument; ensure it has been specified.
@@ -1137,7 +1310,7 @@ while :; do
       VDM_ORG=$2
       shift
     else
-      _echo '[error] "--org" requires a non-empty option argument.'
+      _error '[error] "--org" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1145,7 +1318,7 @@ while :; do
     VDM_ORG=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -o= | --org=) # Handle the case of an empty --packages=
-    _echo '[error] "--org=" requires a non-empty option argument.'
+    _error '[error] "--org=" requires a non-empty option argument.'
     exit 17
     ;;
   --git-date) # Takes an option argument; ensure it has been specified.
@@ -1153,7 +1326,7 @@ while :; do
       VDM_GIT_DATE=$2
       shift
     else
-      _echo '[error] "--git-date" requires a non-empty option argument.'
+      _error '[error] "--git-date" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1161,7 +1334,7 @@ while :; do
     VDM_GIT_DATE=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   --git-date=) # Handle the case of an empty --packages=
-    _echo '[error] "--git-date=" requires a non-empty option argument.'
+    _error '[error] "--git-date=" requires a non-empty option argument.'
     exit 17
     ;;
   -s | --spacer) # Takes an option argument; ensure it has been specified.
@@ -1169,7 +1342,7 @@ while :; do
       VDM_SPACER=$2
       shift
     else
-      _echo '[error] "--spacer" requires a non-empty option argument.'
+      _error '[error] "--spacer" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1177,7 +1350,7 @@ while :; do
     VDM_SPACER=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -s= | --spacer=) # Handle the case of an empty --packages=
-    _echo '[error] "--spacer=" requires a non-empty option argument.'
+    _error '[error] "--spacer=" requires a non-empty option argument.'
     exit 17
     ;;
   -e | --env) # Takes an option argument; ensure it has been specified.
@@ -1185,7 +1358,7 @@ while :; do
       VDM_ENV_FILE_PATH=$2
       shift
     else
-      _echo '[error] "--env" requires a non-empty option argument.'
+      _error '[error] "--env" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1193,7 +1366,7 @@ while :; do
     VDM_ENV_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -e= | --env=) # Handle the case of an empty --packages=
-    _echo '[error] "--env=" requires a non-empty option argument.'
+    _error '[error] "--env=" requires a non-empty option argument.'
     exit 17
     ;;
   -m | --mapper) # Takes an option argument; ensure it has been specified.
@@ -1201,7 +1374,7 @@ while :; do
       VDM_MAPPER_FILE_PATH=$2
       shift
     else
-      _echo '[error] "--mapper" requires a non-empty option argument.'
+      _error '[error] "--mapper" requires a non-empty option argument.'
       exit 17
     fi
     ;;
@@ -1209,7 +1382,7 @@ while :; do
     VDM_MAPPER_FILE_PATH=${1#*=} # Delete everything up to "=" and assign the remainder.
     ;;
   -m= | --mapper=) # Handle the case of an empty --packages=
-    _echo '[error] "--mapper=" requires a non-empty option argument.'
+    _error '[error] "--mapper=" requires a non-empty option argument.'
     exit 17
     ;;
   -t | --access-token) # Takes an option argument; ensure it has been specified.
@@ -1217,12 +1390,28 @@ while :; do
       VDM_ACCESS_TOKEN=$2
       shift
     else
-      _echo '[error] "--token" requires a non-empty option argument.'
+      _error '[error] "--token" requires a non-empty option argument.'
       exit 17
     fi
     ;;
   -t=?* | --access-token=?*)
     VDM_ACCESS_TOKEN=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  --report) # Takes an option argument; ensure it has been specified.
+    if [ "$2" ]; then
+      VDM_REPORT_FILE=$2
+      shift
+    else
+      _error '[error] "--report" requires a non-empty option argument.'
+      exit 17
+    fi
+    ;;
+  --report=?*)
+    VDM_REPORT_FILE=${1#*=} # Delete everything up to "=" and assign the remainder.
+    ;;
+  --report=) # Handle the case of an empty --report=
+    _error '[error] "--report=" requires a non-empty option argument.'
+    exit 17
     ;;
   --debug)
     DEBUG=true
@@ -1233,7 +1422,6 @@ while :; do
     ;;
   --update)
     runUpdate
-    shift
     ;;
   *) # Default case: No more options, so break out of the loop.
     break ;;
@@ -1244,7 +1432,7 @@ done
 # the environment variables path
 tmp_path="$VDM_ZIP_DIR/.${PROGRAM_CODE}"
 # if path not set try global path
-[ -f "$tmp_path" ] || tmp_path="/home/$USER/.config/${PROGRAM_CODE}/.env"
+[ -f "$tmp_path" ] || tmp_path="${HOME:-/home/$USER}/.config/${PROGRAM_CODE}/.env"
 : "${VDM_ENV_FILE_PATH:=$tmp_path}"
 # add env to system
 if [ -f "${VDM_ENV_FILE_PATH}" ]; then
@@ -1254,10 +1442,20 @@ fi
 # the mapper path
 tmp_path="$VDM_ZIP_DIR/.${PROGRAM_CODE}.mapper"
 # if path not set try global path
-[ -f "$tmp_path" ] || tmp_path="/home/$USER/.config/${PROGRAM_CODE}/.mapper"
+[ -f "$tmp_path" ] || tmp_path="${HOME:-/home/$USER}/.config/${PROGRAM_CODE}/.mapper"
 : "${VDM_MAPPER_FILE_PATH:=$tmp_path}"
 # done with the tmp_path
 unset tmp_path
+
+# we change directories while processing, so all paths must be absolute
+VDM_ZIP_DIR=$(getAbsPath "$VDM_ZIP_DIR")
+VDM_MAPPER_FILE_PATH=$(getAbsPath "$VDM_MAPPER_FILE_PATH")
+
+# start a new report file (when set)
+if [ -n "$VDM_REPORT_FILE" ]; then
+  : > "$VDM_REPORT_FILE" || showError "creating the report file ($VDM_REPORT_FILE) ERROR-NR" 8
+  VDM_REPORT_FILE=$(getAbsPath "$VDM_REPORT_FILE")
+fi
 
 # set the git date
 if [ -n "$VDM_GIT_DATE" ]; then
@@ -1310,6 +1508,9 @@ cat <<EOF
 	======================================================
    --git-date=<date>
 	VALUE: $VDM_GIT_DATE
+	======================================================
+   --report=<file>
+	VALUE: $VDM_REPORT_FILE
 	======================================================
    --keep-repo
 	VALUE: $VDM_KEEP_REPO

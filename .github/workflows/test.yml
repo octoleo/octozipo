@@ -1,0 +1,77 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint the scripts
+        run: shellcheck src/octozipo src/action.sh tests/test-action.sh
+
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run the test suite
+        run: |
+          chmod +x src/octozipo src/action.sh tests/test-action.sh
+          bash tests/test-action.sh ./src/action.sh
+
+  action:
+    name: Action self-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare packages and local remotes
+        run: |
+          # a package as a build step would produce it
+          mkdir -p "${RUNNER_TEMP}/build" "${RUNNER_TEMP}/packages"
+          cd "${RUNNER_TEMP}/build"
+          printf '<extension type="component" method="upgrade">\n\t<name>Sample</name>\n\t<version>1.0.0</version>\n</extension>\n' > sample.xml
+          printf '# v1.0.0\n\n- First release\n' > CHANGELOG.md
+          zip -q -r "${RUNNER_TEMP}/packages/sample_v1.0.0.zip" .
+          # a bare repository standing in for git@git.test.local:octoleo/sample.git
+          mkdir -p "${RUNNER_TEMP}/remotes/octoleo"
+          git init -q --bare "${RUNNER_TEMP}/remotes/octoleo/sample.git"
+          git config --global url."${RUNNER_TEMP}/remotes/".insteadOf "git@git.test.local:"
+          git config --global init.defaultBranch master
+
+      - name: Run the action
+        id: octozipo
+        uses: ./
+        with:
+          zip-dir: ${{ runner.temp }}/packages
+          org: octoleo
+          git-url: git.test.local
+          push-create: true
+          git-user: Test Robot
+          git-email: robot@test.local
+
+      - name: Check the outputs
+        env:
+          PROCESSED: ${{ steps.octozipo.outputs.processed }}
+          CREATED: ${{ steps.octozipo.outputs.created }}
+          REPOSITORIES: ${{ steps.octozipo.outputs.repositories }}
+          REPORT: ${{ steps.octozipo.outputs.report }}
+        run: |
+          echo "processed=${PROCESSED} created=${CREATED} repositories=${REPOSITORIES}"
+          echo "report=${REPORT}"
+          test "${PROCESSED}" = "1"
+          test "${CREATED}" = "1"
+          test "${REPOSITORIES}" = "octoleo/sample"
+          test "$(git --git-dir="${RUNNER_TEMP}/remotes/octoleo/sample.git" log --format='%s' -1 master)" = "first commit - v1.0.0"
+          test "$(git --git-dir="${RUNNER_TEMP}/remotes/octoleo/sample.git" tag -l)" = "v1.0.0"
